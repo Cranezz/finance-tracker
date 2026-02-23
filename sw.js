@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financetracker-v5';
+const CACHE_NAME = 'financetracker-v6';
 const ASSETS = [
   '/finance-tracker/index.html',
   '/finance-tracker/manifest.json',
@@ -28,10 +28,9 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Never intercept external API calls — let them go straight to the network
+  // Never intercept external requests — let the browser handle them natively
   if (url.origin !== self.location.origin) {
-    event.respondWith(fetch(event.request));
-    return;
+    return; // do NOT call event.respondWith — browser handles it directly
   }
 
   // For same-origin requests: cache-first
