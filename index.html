@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="Finance">
   <meta name="theme-color" content="#7c6af7">
   <link rel="manifest" href="manifest.json">
-  <script src="https://js.puter.com/v2/"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <title>Finance Tracker</title>
   <style>
     :root {
@@ -363,7 +363,7 @@
       <div class="card">
         <div class="card-title">Log a Purchase</div>
         <button class="btn btn-primary btn-icon" onclick="openFreeReceiptScanner()" style="width:100%;margin-bottom:8px">
-          📷 Scan Receipt — Free
+          📷 Scan Receipt — Free (No Account)
         </button>
         <div style="display:flex;gap:8px;margin-bottom:8px">
           <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptPaste()" style="flex:1">
@@ -483,7 +483,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.4</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.5</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1091,7 +1091,7 @@ function submitCheckingAdj(dir) {
 }
 
 // ══════════════════════════════════════════════════
-//  FREE RECEIPT SCANNER (Puter.js — no API key needed)
+//  FREE RECEIPT SCANNER (Tesseract.js — 100% local, no account needed)
 // ══════════════════════════════════════════════════
 function openFreeReceiptScanner() {
   document.getElementById('receipt-file-input').onchange = handleFreeReceiptFile;
@@ -1101,29 +1101,54 @@ function openFreeReceiptScanner() {
 async function handleFreeReceiptFile(event) {
   const file = event.target.files[0];
   event.target.value = '';
-  event.target.onchange = handleReceiptFile; // restore default handler
+  event.target.onchange = handleReceiptFile; // restore Claude AI handler
   if (!file) return;
 
+  // Show loading modal with progress
   document.getElementById('modal-title').textContent = '📷 Scanning Receipt...';
   document.getElementById('modal-body').innerHTML = `
-    <div style="text-align:center;padding:40px 0">
+    <div style="text-align:center;padding:32px 0">
       <div class="loading-spinner" style="width:40px;height:40px;border-width:3px"></div>
-      <div class="text-muted mt-12">Reading your receipt for free...</div>
-      <div class="text-xs text-muted mt-8">This may take 5–15 seconds</div>
+      <div class="text-muted mt-12" id="ocr-status">Loading OCR engine...</div>
+      <div style="margin-top:16px;background:var(--border);border-radius:99px;height:6px;overflow:hidden">
+        <div id="ocr-progress" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.3s ease"></div>
+      </div>
+      <div class="text-xs text-muted mt-8">Running on your phone — no internet needed</div>
     </div>`;
   showModal();
 
   try {
-    if (typeof puter === 'undefined') throw new Error('Puter.js not loaded — check your internet connection and try again.');
+    if (typeof Tesseract === 'undefined') {
+      throw new Error('OCR engine not loaded. Make sure you have internet on first use, then it works offline.');
+    }
 
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = e => resolve(e.target.result);
-      reader.onerror = () => reject(new Error('Could not read image file'));
-      reader.readAsDataURL(file);
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        const statusEl = document.getElementById('ocr-status');
+        const progressEl = document.getElementById('ocr-progress');
+        if (!statusEl || !progressEl) return;
+        if (m.status === 'loading tesseract core') {
+          statusEl.textContent = 'Loading OCR engine...';
+          progressEl.style.width = '10%';
+        } else if (m.status === 'initializing tesseract') {
+          statusEl.textContent = 'Initializing...';
+          progressEl.style.width = '30%';
+        } else if (m.status === 'loading language traineddata') {
+          statusEl.textContent = 'Loading language data...';
+          progressEl.style.width = '50%';
+        } else if (m.status === 'initializing api') {
+          statusEl.textContent = 'Starting up...';
+          progressEl.style.width = '70%';
+        } else if (m.status === 'recognizing text') {
+          statusEl.textContent = 'Reading receipt...';
+          progressEl.style.width = Math.round(70 + (m.progress * 30)) + '%';
+        }
+      }
     });
 
-    const text = await puter.ai.img2txt(dataUrl);
+    const { data: { text } } = await worker.recognize(file);
+    await worker.terminate();
+
     if (!text || !text.trim()) {
       showReceiptReview([]);
       return;
@@ -1138,7 +1163,7 @@ async function handleFreeReceiptFile(event) {
     document.getElementById('modal-body').innerHTML = `
       <div class="text-danger" style="margin-bottom:8px;font-weight:700">Could not read receipt</div>
       <div class="text-sm text-muted" style="margin-bottom:12px">${escHtml(msg)}</div>
-      <div class="text-sm text-muted" style="margin-bottom:16px">💡 Try the "Paste Text" option instead — use your iPhone Camera app to copy the receipt text, then paste it.</div>
+      <div class="text-sm text-muted" style="margin-bottom:16px">💡 Tips for better results: make sure the receipt is flat and well-lit. Or use "Paste Text" — open iPhone Camera, point at receipt, tap the Live Text icon, copy all, paste here.</div>
       <button class="btn btn-secondary" onclick="openReceiptPaste()" style="margin-bottom:8px">📋 Paste Text Instead</button>
       <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   }
