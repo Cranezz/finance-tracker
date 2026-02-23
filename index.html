@@ -310,6 +310,9 @@
   </div>
 </div>
 
+<!-- Hidden file input for camera receipts -->
+<input type="file" id="receipt-file-input" accept="image/*" capture="environment" style="display:none" onchange="handleCameraReceiptFile(event)">
+
 <!-- App -->
 <div id="app">
   <header id="header">
@@ -358,8 +361,11 @@
       <!-- Log expense -->
       <div class="card">
         <div class="card-title">Log a Purchase</div>
-        <button class="btn btn-primary btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:8px">
-          🤖 Scan Receipt (AI — paste text)
+        <button class="btn btn-primary btn-icon" onclick="openCameraScanner()" style="width:100%;margin-bottom:8px">
+          📷 Scan Receipt (Camera)
+        </button>
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:8px">
+          🤖 Scan Receipt (Paste Text)
         </button>
         <button class="btn btn-secondary btn-sm btn-icon" onclick="openManualExpense()" style="width:100%">
           ✏️ Enter Manually
@@ -471,7 +477,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.13</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.14</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1079,10 +1085,128 @@ function submitCheckingAdj(dir) {
 }
 
 // ══════════════════════════════════════════════════
+//  CAMERA RECEIPT SCANNER (photo → Cloudflare Worker → Claude AI)
+//  Image is sent to our Cloudflare proxy which forwards to Anthropic.
+//  The proxy is server-side so CORS is not an issue.
+// ══════════════════════════════════════════════════
+function openCameraScanner() {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    alert('No API key set.\n\nGo to Settings → Claude AI and paste your Anthropic API key.\n\nGet one at console.anthropic.com');
+    return;
+  }
+  document.getElementById('receipt-file-input').click();
+}
+
+async function handleCameraReceiptFile(event) {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+
+  document.getElementById('modal-title').textContent = '📷 Scanning Receipt...';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="text-align:center;padding:40px 0">
+      <div class="loading-spinner" style="width:40px;height:40px;border-width:3px"></div>
+      <div class="text-muted mt-12">Reading your receipt with AI...</div>
+      <div class="text-xs text-muted mt-8">This may take 5–10 seconds</div>
+    </div>`;
+  showModal();
+
+  try {
+    const base64 = await fileToBase64(file);
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const safeMime = validTypes.includes(file.type) ? file.type : 'image/jpeg';
+    const items = await scanReceiptImageWithClaude(base64, safeMime);
+    showReceiptReview(items);
+  } catch(err) {
+    document.getElementById('modal-title').textContent = '⚠️ Scan Failed';
+    document.getElementById('modal-body').innerHTML = `
+      <div class="text-danger" style="margin-bottom:8px;font-weight:700">Could not read receipt</div>
+      <div class="text-sm text-muted" style="margin-bottom:12px;word-break:break-all">${escHtml(err.message)}</div>
+      <div class="mt-12">
+        <button class="btn btn-secondary" onclick="openReceiptScanner()" style="margin-bottom:8px">📋 Paste Text Instead</button>
+        <button class="btn btn-secondary" onclick="openManualExpense()" style="margin-bottom:8px">✏️ Enter Manually</button>
+        <button class="btn btn-secondary" onclick="hideModal()">Close</button>
+      </div>`;
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const base64 = e.target.result.split(',')[1];
+      if (!base64) { reject(new Error('Could not read image')); return; }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function scanReceiptImageWithClaude(base64, mimeType) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('No API key set');
+
+  const prompt = `Look at this receipt image and extract every purchased item with its price.
+
+For each item choose the best category:
+- food (groceries, drinks, restaurant food, produce, snacks, coffee)
+- fun (flowers, games, gifts, entertainment, hobbies, books, movies)
+- clothing (shirts, shoes, pants, accessories)
+- misc (everything else)
+
+Reply ONLY with a raw JSON array, no markdown, no explanation:
+[{"name":"Item Name","amount":0.00,"category":"food"}]
+
+Rules:
+- Only include purchased items, NOT tax, subtotals, totals, or store info
+- If unreadable return []`;
+
+  let response;
+  try {
+    response = await fetch('https://rough-bush-c143.killerclown73242.workers.dev', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+  } catch(networkErr) {
+    throw new Error('Network request failed. (' + networkErr.message + ')');
+  }
+
+  if (!response.ok) {
+    let errMsg = `API error ${response.status}`;
+    try {
+      const errJson = await response.json();
+      errMsg = `${response.status}: ${errJson.error?.message || errMsg}`;
+    } catch(_) {}
+    throw new Error(errMsg);
+  }
+
+  const json = await response.json();
+  const text = json.content?.[0]?.text || '[]';
+  try { return JSON.parse(text); } catch(_) {}
+  const match = text.match(/\[[\s\S]*\]/);
+  if (match) { try { return JSON.parse(match[0]); } catch(_) {} }
+  return [];
+}
+
+// ══════════════════════════════════════════════════
 //  RECEIPT SCANNING (text → Claude AI)
-//  iOS Safari blocks direct image fetch to external APIs (CORS).
-//  Workaround: user pastes receipt text (via iPhone Live Text),
-//  we send that text to Claude which parses + categorizes it.
 // ══════════════════════════════════════════════════
 function openReceiptScanner() {
   const apiKey = getApiKey();
@@ -1172,7 +1296,7 @@ ${receiptText}`;
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
+        model: 'claude-3-haiku-20240307',
         max_tokens: 1024,
         messages: [{ role: 'user', content: prompt }]
       })
