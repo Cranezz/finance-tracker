@@ -484,7 +484,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.21</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.22</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -919,13 +919,13 @@ function openPaycheckModal() {
       </div>
     </div>
     <button class="btn btn-primary" onclick="submitPaycheck('full')" style="margin-bottom:8px">Add Paycheck 💵
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds money to balances + checking</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds money to all balances + checking</div>
     </button>
-    <button class="btn btn-secondary" onclick="submitPaycheck('nochecking')" style="margin-bottom:8px">Split Without Adding to Checking 🏦
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Updates all balances, skips checking (already deposited)</div>
+    <button class="btn btn-secondary" onclick="submitPaycheck('nobalances')" style="margin-bottom:8px">Just Show the Split 📋
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Creates transfer checklist, adds nothing to balances</div>
     </button>
     <button class="btn btn-secondary" onclick="submitPaycheck('preview')" style="margin-bottom:8px">Preview Only 👀
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">See breakdown without changing anything</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">See breakdown without saving anything at all</div>
     </button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
@@ -957,17 +957,25 @@ function submitPaycheck(mode) {
     return;
   }
 
-  if (mode === 'nochecking') {
-    // Process normally but don't add to checking balance
+  if (mode === 'nobalances') {
+    // Process normally then undo ALL balance changes — keeps checklist + history only
     const result = processNewPaycheck(data, gross);
     data = result.d;
-    // Undo the checking addition that processNewPaycheck added
+    // Undo checking addition
     data.checkingBalance = roundCent((data.checkingBalance||0) - gross);
+    // Undo all category balance additions
+    const latestPaycheck = data.paychecks[0];
+    ALL_KEYS.forEach(k => {
+      data.categories[k].balance = roundCent(data.categories[k].balance - (latestPaycheck.splits[k]||0));
+      // Also undo any goalMet flags that got set
+      if (data.categories[k].goal !== null) {
+        data.categories[k].goalMet = data.categories[k].balance >= data.categories[k].goal;
+      }
+    });
     saveData(data);
     hideModal();
     renderAll();
     switchTab(1);
-    if (result.celebrations.length) showCelebrations(result.celebrations, 0);
     return;
   }
 
