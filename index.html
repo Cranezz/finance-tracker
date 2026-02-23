@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-title" content="Finance">
   <meta name="theme-color" content="#7c6af7">
   <link rel="manifest" href="manifest.json">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <title>Finance Tracker</title>
   <style>
     :root {
@@ -362,19 +361,11 @@
       <!-- Log expense -->
       <div class="card">
         <div class="card-title">Log a Purchase</div>
-        <button class="btn btn-primary btn-icon" onclick="openFreeReceiptScanner()" style="width:100%;margin-bottom:8px">
-          📷 Scan Receipt — Free (No Account)
+        <button class="btn btn-primary btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:8px">
+          🤖 Scan Receipt (Claude AI)
         </button>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptPaste()" style="flex:1">
-            📋 Paste Text
-          </button>
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="openManualExpense()" style="flex:1">
-            ✏️ Enter Manually
-          </button>
-        </div>
-        <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:4px">
-          🤖 Scan Receipt (Claude AI — needs API key)
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="openManualExpense()" style="width:100%">
+          ✏️ Enter Manually
         </button>
       </div>
 
@@ -483,7 +474,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.6</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.7</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1088,172 +1079,6 @@ function submitCheckingAdj(dir) {
   saveData(data);
   hideModal();
   renderAll();
-}
-
-// ══════════════════════════════════════════════════
-//  FREE RECEIPT SCANNER (Tesseract.js — 100% local, no account needed)
-// ══════════════════════════════════════════════════
-function openFreeReceiptScanner() {
-  document.getElementById('receipt-file-input').onchange = handleFreeReceiptFile;
-  document.getElementById('receipt-file-input').click();
-}
-
-async function handleFreeReceiptFile(event) {
-  const file = event.target.files[0];
-  event.target.value = '';
-  event.target.onchange = handleReceiptFile; // restore Claude AI handler
-  if (!file) return;
-
-  // Show loading modal with progress
-  document.getElementById('modal-title').textContent = '📷 Scanning Receipt...';
-  document.getElementById('modal-body').innerHTML = `
-    <div style="text-align:center;padding:32px 0">
-      <div class="loading-spinner" style="width:40px;height:40px;border-width:3px"></div>
-      <div class="text-muted mt-12" id="ocr-status">Loading OCR engine...</div>
-      <div style="margin-top:16px;background:var(--border);border-radius:99px;height:6px;overflow:hidden">
-        <div id="ocr-progress" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.3s ease"></div>
-      </div>
-      <div class="text-xs text-muted mt-8">Running on your phone — no internet needed</div>
-    </div>`;
-  showModal();
-
-  try {
-    if (typeof Tesseract === 'undefined') {
-      throw new Error('OCR engine not loaded. Make sure you have internet on first use, then it works offline.');
-    }
-
-    const worker = await Tesseract.createWorker('eng', 1, {
-      logger: m => {
-        const statusEl = document.getElementById('ocr-status');
-        const progressEl = document.getElementById('ocr-progress');
-        if (!statusEl || !progressEl) return;
-        if (m.status === 'loading tesseract core') {
-          statusEl.textContent = 'Loading OCR engine...';
-          progressEl.style.width = '10%';
-        } else if (m.status === 'initializing tesseract') {
-          statusEl.textContent = 'Initializing...';
-          progressEl.style.width = '30%';
-        } else if (m.status === 'loading language traineddata') {
-          statusEl.textContent = 'Loading language data...';
-          progressEl.style.width = '50%';
-        } else if (m.status === 'initializing api') {
-          statusEl.textContent = 'Starting up...';
-          progressEl.style.width = '70%';
-        } else if (m.status === 'recognizing text') {
-          statusEl.textContent = 'Reading receipt...';
-          progressEl.style.width = Math.round(70 + (m.progress * 30)) + '%';
-        }
-      }
-    });
-
-    const { data: { text } } = await worker.recognize(file);
-    await worker.terminate();
-
-    if (!text || !text.trim()) {
-      showReceiptReview([]);
-      return;
-    }
-
-    const items = extractItemsFromText(text);
-    showReceiptReview(items);
-
-  } catch(err) {
-    const msg = err.message || 'Unknown error';
-    document.getElementById('modal-title').textContent = '⚠️ Scan Failed';
-    document.getElementById('modal-body').innerHTML = `
-      <div class="text-danger" style="margin-bottom:8px;font-weight:700">Could not read receipt</div>
-      <div class="text-sm text-muted" style="margin-bottom:12px">${escHtml(msg)}</div>
-      <div class="text-sm text-muted" style="margin-bottom:16px">💡 Tips for better results: make sure the receipt is flat and well-lit. Or use "Paste Text" — open iPhone Camera, point at receipt, tap the Live Text icon, copy all, paste here.</div>
-      <button class="btn btn-secondary" onclick="openReceiptPaste()" style="margin-bottom:8px">📋 Paste Text Instead</button>
-      <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
-  }
-}
-
-// ══════════════════════════════════════════════════
-//  FREE RECEIPT PASTE PARSER
-// ══════════════════════════════════════════════════
-function openReceiptPaste() {
-  document.getElementById('modal-title').textContent = '📋 Paste Receipt Text';
-  document.getElementById('modal-body').innerHTML = `
-    <div class="text-sm text-muted" style="margin-bottom:12px">
-      <strong>How to use iPhone Live Text (free):</strong><br>
-      1. Open Camera app, point at your receipt<br>
-      2. Tap the Live Text icon (bottom right)<br>
-      3. Tap "Select All" then "Copy"<br>
-      4. Come back here and paste below
-    </div>
-    <div class="form-group">
-      <label class="form-label">Paste receipt text here</label>
-      <textarea class="form-input" id="receipt-paste-text" rows="8"
-        style="resize:none;font-family:monospace;font-size:13px;line-height:1.5"
-        placeholder="Paste your receipt text here...&#10;&#10;Example:&#10;TOMATO SOUP          2.49&#10;FLOWERS              8.99&#10;BREAD                3.19"></textarea>
-    </div>
-    <button class="btn btn-primary" onclick="parseReceiptText()">Parse Items 🔍</button>
-    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
-  showModal();
-  setTimeout(() => { const t = document.getElementById('receipt-paste-text'); if(t) t.focus(); }, 100);
-}
-
-function parseReceiptText() {
-  const raw = document.getElementById('receipt-paste-text')?.value || '';
-  if (!raw.trim()) { alert('Please paste some receipt text first'); return; }
-
-  const items = extractItemsFromText(raw);
-  if (items.length === 0) {
-    document.getElementById('modal-title').textContent = 'No Items Found';
-    document.getElementById('modal-body').innerHTML = `
-      <div class="text-muted" style="margin-bottom:12px">Couldn't find any price items in that text. Make sure the text includes item names and prices like "Soup 2.49".</div>
-      <button class="btn btn-secondary" onclick="openReceiptPaste()" style="margin-bottom:8px">Try Again</button>
-      <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
-    return;
-  }
-  showReceiptReview(items);
-}
-
-function extractItemsFromText(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const items = [];
-
-  // Skip lines that are clearly not items
-  const skipPatterns = [
-    /^(subtotal|sub total|total|tax|gst|hst|pst|vat|change|cash|card|credit|debit|visa|mastercard|amex|balance|thank|receipt|store|date|time|phone|address|www|http|member|rewards|points|your|cashier|register|terminal|auth|approval|ref|item|qty|price|amount|desc)/i,
-    /^\*+$/,
-    /^-+$/,
-    /^=+$/,
-    /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/, // dates
-    /^\d{3}[-.\s]\d{3}[-.\s]\d{4}/, // phone numbers
-    /^#\d+/, // receipt/store numbers
-  ];
-
-  for (const line of lines) {
-    if (skipPatterns.some(p => p.test(line))) continue;
-
-    // Look for a price pattern: digits with a decimal (e.g. 2.49, $8.99, 12.00)
-    // The price can be at the end or anywhere in the line
-    const priceMatch = line.match(/\$?\s*(\d{1,4}\.\d{2})\s*[A-Z]?\s*$/);
-    if (!priceMatch) continue;
-
-    const amount = parseFloat(priceMatch[1]);
-    if (amount <= 0 || amount > 9999) continue; // skip obviously wrong values
-
-    // Item name is everything before the price
-    let name = line.slice(0, line.lastIndexOf(priceMatch[0])).trim();
-    // Clean up common receipt artifacts
-    name = name.replace(/^\d+\s+/, '');        // leading quantity like "2 "
-    name = name.replace(/\s{2,}/g, ' ');       // collapse spaces
-    name = name.replace(/[*#@]+/g, '').trim(); // remove symbols
-    name = name.replace(/\s+\d+$/, '').trim(); // trailing item codes
-
-    if (name.length < 2) continue; // skip if no real name left
-
-    // Title case the name
-    name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-
-    const category = guessCategory(name);
-    items.push({ name, amount, category });
-  }
-
-  return items;
 }
 
 // ══════════════════════════════════════════════════
