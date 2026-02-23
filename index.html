@@ -246,6 +246,54 @@
 </head>
 <body>
 
+<!-- Setup Overlay -->
+<div id="setup-overlay" style="display:none;position:fixed;inset:0;z-index:200;background:var(--bg);overflow-y:auto;padding:40px 20px;padding-top:calc(40px + env(safe-area-inset-top,0));padding-bottom:calc(40px + env(safe-area-inset-bottom,0))">
+  <div style="font-size:56px;text-align:center;margin-bottom:8px">💰</div>
+  <div style="font-size:26px;font-weight:800;text-align:center;margin-bottom:8px">Finance Tracker</div>
+  <div style="font-size:15px;color:var(--text-muted);text-align:center;margin-bottom:32px;line-height:1.5">Welcome! Enter your current balances to get started.<br>Leave blank to start from $0.</div>
+
+  <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--accent);margin:24px 0 12px">Savings Goals</div>
+  <div class="form-group">
+    <label class="form-label">🛡️ Emergency Fund</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-emergencyFund"></div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">💍 Wedding / Honeymoon Fund</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-weddingFund"></div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">🎓 College Savings (BSU)</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-collegeSavings"></div>
+  </div>
+
+  <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--accent);margin:24px 0 12px">Spending Buckets</div>
+  <div class="form-group">
+    <label class="form-label">🍔 Food</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-food"></div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">🎮 Fun Money</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-fun"></div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">👕 Clothing</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-clothing"></div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">📦 Miscellaneous</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-misc"></div>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">💳 Checking Account Balance</label>
+    <div class="input-wrap"><span class="dollar-sign">$</span><input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="setup-checking"></div>
+  </div>
+
+  <div style="margin-top:16px">
+    <button class="btn btn-primary" onclick="submitSetup()">Get Started 🚀</button>
+  </div>
+</div>
+
 <!-- Celebration -->
 <div id="celebrate-overlay">
   <div class="celebrate-emoji">🎉</div>
@@ -484,6 +532,7 @@ function saveData(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
 function freshData() {
   return {
     version: 2,
+    setupComplete: false,
     categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
     paychecks: [],
     expenses: [],
@@ -1264,6 +1313,28 @@ function hideCelebration() {
 }
 
 // ══════════════════════════════════════════════════
+//  SETUP SCREEN
+// ══════════════════════════════════════════════════
+function showSetup() { document.getElementById('setup-overlay').style.display = 'block'; }
+function hideSetup() { document.getElementById('setup-overlay').style.display = 'none'; }
+
+function submitSetup() {
+  const keys = ['emergencyFund','weddingFund','collegeSavings','food','fun','clothing','misc'];
+  keys.forEach(k => {
+    const inp = document.getElementById('setup-' + k);
+    const val = inp ? roundCent(parseFloat(inp.value) || 0) : 0;
+    data.categories[k].balance = val;
+    if (data.categories[k].goal !== null) data.categories[k].goalMet = val >= data.categories[k].goal;
+  });
+  const chkInp = document.getElementById('setup-checking');
+  data.checkingBalance = chkInp ? roundCent(parseFloat(chkInp.value) || 0) : 0;
+  data.setupComplete = true;
+  saveData(data);
+  hideSetup();
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════
 //  SERVICE WORKER
 // ══════════════════════════════════════════════════
 if ('serviceWorker' in navigator) {
@@ -1273,7 +1344,16 @@ if ('serviceWorker' in navigator) {
 // ══════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════
-renderAll();
+function init() {
+  data = loadData() || freshData();
+  if (!data.setupComplete) {
+    showSetup();
+  } else {
+    hideSetup();
+    renderAll();
+  }
+}
+init();
 </script>
 </body>
 </html>
