@@ -477,7 +477,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.17</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.18</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1148,20 +1148,21 @@ async function scanReceiptImageWithClaude(base64, mimeType) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key set');
 
-  const prompt = `Look at this receipt image and extract every purchased item with its price.
+  const prompt = `Look at this receipt image. Find:
+1. The store/restaurant name
+2. The total amount paid (the final total, not subtotal)
+3. The best spending category for this purchase
 
-For each item choose the best category:
-- food (groceries, drinks, restaurant food, produce, snacks, coffee)
-- fun (flowers, games, gifts, entertainment, hobbies, books, movies)
-- clothing (shirts, shoes, pants, accessories)
+Category options:
+- food (grocery store, restaurant, coffee shop, fast food)
+- fun (entertainment, games, gifts, flowers, hobbies)
+- clothing (clothes, shoes, accessories)
 - misc (everything else)
 
-Reply ONLY with a raw JSON array, no markdown, no explanation:
-[{"name":"Item Name","amount":0.00,"category":"food"}]
+Reply ONLY with a raw JSON array with ONE item, no markdown, no explanation:
+[{"name":"Store Name","amount":0.00,"category":"food"}]
 
-Rules:
-- Only include purchased items, NOT tax, subtotals, totals, or store info
-- If unreadable return []`;
+If you cannot read the receipt, return [].`;
 
   let response;
   try {
@@ -1268,20 +1269,21 @@ async function scanReceiptTextWithClaude(receiptText) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key set');
 
-  const prompt = `Here is the raw text from a receipt. Extract every purchased item with its price.
+  const prompt = `Here is the raw text from a receipt. Find:
+1. The store/restaurant name
+2. The total amount paid (the final total, not subtotal)
+3. The best spending category for this purchase
 
-For each item choose the best category:
-- food (groceries, drinks, restaurant food, produce, snacks, coffee)
-- fun (flowers, games, gifts, entertainment, hobbies, books, movies, streaming)
-- clothing (shirts, shoes, pants, accessories)
+Category options:
+- food (grocery store, restaurant, coffee shop, fast food)
+- fun (entertainment, games, gifts, flowers, hobbies)
+- clothing (clothes, shoes, accessories)
 - misc (everything else)
 
-Reply ONLY with a raw JSON array, no markdown, no explanation:
-[{"name":"Item Name","amount":0.00,"category":"food"}]
+Reply ONLY with a raw JSON array with ONE item, no markdown, no explanation:
+[{"name":"Store Name","amount":0.00,"category":"food"}]
 
-Rules:
-- Only include purchased items, NOT tax lines, subtotals, totals, change, or store info
-- If no items found return []
+If no total found, return [].
 
 Receipt text:
 ${receiptText}`;
