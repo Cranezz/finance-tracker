@@ -1,11 +1,15 @@
-const CACHE_NAME = 'financetracker-v1';
-const ASSETS = ['/index.html', '/manifest.json', '/sw.js'];
+const CACHE_NAME = 'financetracker-v3';
+const ASSETS = [
+  '/finance-tracker/index.html',
+  '/finance-tracker/manifest.json',
+  '/finance-tracker/sw.js',
+];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       return cache.addAll(ASSETS).catch(() => {
-        // If assets fail (e.g. opened from file://), just cache what we can
+        // If prefetch fails (e.g. offline), continue anyway
       });
     })
   );
