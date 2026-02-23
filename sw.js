@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financetracker-v3';
+const CACHE_NAME = 'financetracker-v4';
 const ASSETS = [
   '/finance-tracker/index.html',
   '/finance-tracker/manifest.json',
@@ -8,9 +8,7 @@ const ASSETS = [
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(ASSETS).catch(() => {
-        // If prefetch fails (e.g. offline), continue anyway
-      });
+      return cache.addAll(ASSETS).catch(() => {});
     })
   );
   self.skipWaiting();
@@ -28,6 +26,15 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // Never intercept external API calls — let them go straight to the network
+  if (url.origin !== self.location.origin) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // For same-origin requests: cache-first
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
@@ -38,7 +45,7 @@ self.addEventListener('fetch', event => {
         const cloned = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, cloned));
         return response;
-      }).catch(() => cached);
+      });
     })
   );
 });
