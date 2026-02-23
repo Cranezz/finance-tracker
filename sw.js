@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financetracker-v4';
+const CACHE_NAME = 'financetracker-v5';
 const ASSETS = [
   '/finance-tracker/index.html',
   '/finance-tracker/manifest.json',
