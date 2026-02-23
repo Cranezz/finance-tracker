@@ -310,9 +310,6 @@
   </div>
 </div>
 
-<!-- Hidden file input for receipts -->
-<input type="file" id="receipt-file-input" accept="image/*" capture="environment" style="display:none" onchange="handleReceiptFile(event)">
-
 <!-- App -->
 <div id="app">
   <header id="header">
@@ -362,7 +359,7 @@
       <div class="card">
         <div class="card-title">Log a Purchase</div>
         <button class="btn btn-primary btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:8px">
-          🤖 Scan Receipt (Claude AI)
+          🤖 Scan Receipt (AI — paste text)
         </button>
         <button class="btn btn-secondary btn-sm btn-icon" onclick="openManualExpense()" style="width:100%">
           ✏️ Enter Manually
@@ -474,7 +471,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.10</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.11</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1082,7 +1079,10 @@ function submitCheckingAdj(dir) {
 }
 
 // ══════════════════════════════════════════════════
-//  RECEIPT SCANNING (AI / camera)
+//  RECEIPT SCANNING (text → Claude AI)
+//  iOS Safari blocks direct image fetch to external APIs (CORS).
+//  Workaround: user pastes receipt text (via iPhone Live Text),
+//  we send that text to Claude which parses + categorizes it.
 // ══════════════════════════════════════════════════
 function openReceiptScanner() {
   const apiKey = getApiKey();
@@ -1090,76 +1090,65 @@ function openReceiptScanner() {
     alert('No API key set.\n\nGo to Settings → Claude AI and paste your Anthropic API key (starts with sk-ant-...).\n\nGet one free at console.anthropic.com');
     return;
   }
-  document.getElementById('receipt-file-input').click();
+  document.getElementById('modal-title').textContent = '🤖 Scan Receipt with AI';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:14px">
+      <strong>How to copy your receipt:</strong><br>
+      1. Open your iPhone <strong>Camera</strong> app<br>
+      2. Point it at the receipt — tap the <strong>Live Text button</strong> (bottom right)<br>
+      3. Tap <strong>Select All</strong> → <strong>Copy</strong><br>
+      4. Come back here and paste below
+    </div>
+    <div class="form-group">
+      <label class="form-label">Paste receipt text</label>
+      <textarea class="form-input" id="receipt-text-input" rows="7"
+        style="resize:none;font-family:monospace;font-size:13px;line-height:1.5"
+        placeholder="Paste receipt text here..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="submitReceiptText()">🤖 Parse with Claude AI</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  setTimeout(() => { const t = document.getElementById('receipt-text-input'); if(t) t.focus(); }, 100);
 }
 
-async function handleReceiptFile(event) {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
+async function submitReceiptText() {
+  const raw = document.getElementById('receipt-text-input')?.value || '';
+  if (!raw.trim()) { alert('Please paste some receipt text first'); return; }
 
-  document.getElementById('modal-title').textContent = '📷 Scanning Receipt...';
+  document.getElementById('modal-title').textContent = '🤖 Claude is reading...';
   document.getElementById('modal-body').innerHTML = `
     <div style="text-align:center;padding:40px 0">
       <div class="loading-spinner" style="width:40px;height:40px;border-width:3px"></div>
-      <div class="text-muted mt-12">Reading your receipt with AI...</div>
-      <div class="text-xs text-muted mt-8">This may take 5–10 seconds</div>
+      <div class="text-muted mt-12">Claude is parsing your receipt...</div>
+      <div class="text-xs text-muted mt-8">Usually takes 2–4 seconds</div>
     </div>`;
-  showModal();
 
   try {
-    const base64 = await fileToBase64(file);
-    const items = await scanReceiptWithClaude(base64, file.type);
+    const items = await scanReceiptTextWithClaude(raw);
     showReceiptReview(items);
   } catch(err) {
     const msg = err.message || 'Unknown error';
-    let hint = '';
-    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Load failed')) {
-      hint = '<div class="text-sm text-muted mt-8">💡 This is usually a network issue. Make sure you have internet, then try again. If it keeps failing, check that your API key is correct in Settings.</div>';
-    } else if (msg.includes('401') || msg.includes('invalid') || msg.toLowerCase().includes('auth')) {
-      hint = '<div class="text-sm text-muted mt-8">💡 Your API key looks wrong. Go to Settings → Claude AI and re-paste it. Make sure there are no extra spaces.</div>';
-    } else if (msg.includes('429')) {
-      hint = '<div class="text-sm text-muted mt-8">💡 Too many requests. Wait 30 seconds and try again.</div>';
-    }
     document.getElementById('modal-title').textContent = '⚠️ Scan Failed';
     document.getElementById('modal-body').innerHTML = `
-      <div class="text-danger" style="margin-bottom:8px;font-weight:700">Could not read receipt</div>
+      <div class="text-danger" style="margin-bottom:8px;font-weight:700">Could not parse receipt</div>
       <div class="text-sm text-muted" style="margin-bottom:12px;word-break:break-all">${escHtml(msg)}</div>
-      ${hint}
-      <div class="mt-16">
-        <button class="btn btn-secondary" onclick="openManualExpense()" style="margin-bottom:8px">✏️ Enter Manually Instead</button>
+      <div class="mt-12">
+        <button class="btn btn-secondary" onclick="openReceiptScanner()" style="margin-bottom:8px">Try Again</button>
+        <button class="btn btn-secondary" onclick="openManualExpense()" style="margin-bottom:8px">✏️ Enter Manually</button>
         <button class="btn btn-secondary" onclick="hideModal()">Close</button>
       </div>`;
   }
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const result = e.target.result;
-      const base64 = result.split(',')[1];
-      if (!base64) { reject(new Error('Could not read image file')); return; }
-      resolve(base64);
-    };
-    reader.onerror = () => reject(new Error('Failed to read image file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function scanReceiptWithClaude(base64, mimeType) {
+async function scanReceiptTextWithClaude(receiptText) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key set');
 
-  // Ensure mime type is valid for Anthropic
-  const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  const safeMime = validTypes.includes(mimeType) ? mimeType : 'image/jpeg';
-
-  const prompt = `Look at this receipt image and extract every purchased item with its price.
+  const prompt = `Here is the raw text from a receipt. Extract every purchased item with its price.
 
 For each item choose the best category:
-- food (groceries, drinks, restaurant food, soup, produce, snacks)
-- fun (flowers, games, gifts, entertainment, hobbies, books, movies)
+- food (groceries, drinks, restaurant food, produce, snacks, coffee)
+- fun (flowers, games, gifts, entertainment, hobbies, books, movies, streaming)
 - clothing (shirts, shoes, pants, accessories)
 - misc (everything else)
 
@@ -1167,8 +1156,11 @@ Reply ONLY with a raw JSON array, no markdown, no explanation:
 [{"name":"Item Name","amount":0.00,"category":"food"}]
 
 Rules:
-- Only include purchased items, NOT tax lines, subtotals, totals, or store info
-- If the image is unreadable return []`;
+- Only include purchased items, NOT tax lines, subtotals, totals, change, or store info
+- If no items found return []
+
+Receipt text:
+${receiptText}`;
 
   let response;
   try {
@@ -1183,51 +1175,28 @@ Rules:
       body: JSON.stringify({
         model: 'claude-3-5-haiku-20241022',
         max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: safeMime, data: base64 } },
-            { type: 'text', text: prompt }
-          ]
-        }]
+        messages: [{ role: 'user', content: prompt }]
       })
     });
   } catch(networkErr) {
-    throw new Error('Network request failed — check your internet connection. (' + networkErr.message + ')');
+    throw new Error('Network request failed. (' + networkErr.message + ')');
   }
 
   if (!response.ok) {
     let errMsg = `API error ${response.status}`;
-    let rawBody = '';
     try {
-      rawBody = await response.text();
-      const errJson = JSON.parse(rawBody);
-      errMsg = `${response.status}: ${errJson.error?.message || rawBody}`;
-    } catch(_) {
-      if (rawBody) errMsg = `${response.status}: ${rawBody}`;
-    }
+      const errJson = await response.json();
+      errMsg = `${response.status}: ${errJson.error?.message || errMsg}`;
+    } catch(_) {}
     throw new Error(errMsg);
   }
 
-  let json;
-  try {
-    json = await response.json();
-  } catch(_) {
-    throw new Error('Invalid response from API');
-  }
+  const json = await response.json();
+  const text = json.content?.[0]?.text || '[]';
 
-  const text = (json.content && json.content[0]?.text) || '[]';
-
-  // Try direct parse first
   try { return JSON.parse(text); } catch(_) {}
-
-  // Try to extract JSON array from text
-  const match = text.match(/\[[\s\S]*?\]/);
-  if (match) {
-    try { return JSON.parse(match[0]); } catch(_) {}
-  }
-
-  // Nothing parseable — return empty so user can enter manually
+  const match = text.match(/\[[\s\S]*\]/);
+  if (match) { try { return JSON.parse(match[0]); } catch(_) {} }
   return [];
 }
 
