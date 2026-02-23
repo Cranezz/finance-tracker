@@ -471,7 +471,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.11</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.12</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1164,13 +1164,12 @@ ${receiptText}`;
 
   let response;
   try {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
+    response = await fetch('https://rough-bush-c143.killerclown73242.workers.dev', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-calls': 'true',
       },
       body: JSON.stringify({
         model: 'claude-3-5-haiku-20241022',
