@@ -361,15 +361,18 @@
       <!-- Log expense -->
       <div class="card">
         <div class="card-title">Log a Purchase</div>
-        <div style="display:flex;gap:8px;margin-bottom:14px">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptScanner()" style="flex:1">
-            📷 Scan Receipt
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptPaste()" style="flex:1">
+            📋 Paste Receipt
           </button>
           <button class="btn btn-secondary btn-sm btn-icon" onclick="openManualExpense()" style="flex:1">
             ✏️ Enter Manually
           </button>
         </div>
-        <div class="text-xs text-muted">Tap "Scan Receipt" to use your camera — Claude AI will read it and sort items automatically.</div>
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="openReceiptScanner()" style="width:100%;margin-bottom:8px">
+          📷 Scan Receipt (AI — needs API key)
+        </button>
+        <div class="text-xs text-muted">💡 <strong>Free:</strong> Use iPhone's Live Text — open your Camera app, point at the receipt, long-press to select all text, copy it, then tap "Paste Receipt" above.</div>
       </div>
 
       <!-- Recent expenses -->
@@ -477,7 +480,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.2</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.3</div>
         <div class="text-xs text-muted">Last updated Feb 2026</div>
       </div>
     </div>
@@ -1085,7 +1088,94 @@ function submitCheckingAdj(dir) {
 }
 
 // ══════════════════════════════════════════════════
-//  RECEIPT SCANNING
+//  FREE RECEIPT PASTE PARSER
+// ══════════════════════════════════════════════════
+function openReceiptPaste() {
+  document.getElementById('modal-title').textContent = '📋 Paste Receipt Text';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:12px">
+      <strong>How to use iPhone Live Text (free):</strong><br>
+      1. Open Camera app, point at your receipt<br>
+      2. Tap the Live Text icon (bottom right)<br>
+      3. Tap "Select All" then "Copy"<br>
+      4. Come back here and paste below
+    </div>
+    <div class="form-group">
+      <label class="form-label">Paste receipt text here</label>
+      <textarea class="form-input" id="receipt-paste-text" rows="8"
+        style="resize:none;font-family:monospace;font-size:13px;line-height:1.5"
+        placeholder="Paste your receipt text here...&#10;&#10;Example:&#10;TOMATO SOUP          2.49&#10;FLOWERS              8.99&#10;BREAD                3.19"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="parseReceiptText()">Parse Items 🔍</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  setTimeout(() => { const t = document.getElementById('receipt-paste-text'); if(t) t.focus(); }, 100);
+}
+
+function parseReceiptText() {
+  const raw = document.getElementById('receipt-paste-text')?.value || '';
+  if (!raw.trim()) { alert('Please paste some receipt text first'); return; }
+
+  const items = extractItemsFromText(raw);
+  if (items.length === 0) {
+    document.getElementById('modal-title').textContent = 'No Items Found';
+    document.getElementById('modal-body').innerHTML = `
+      <div class="text-muted" style="margin-bottom:12px">Couldn't find any price items in that text. Make sure the text includes item names and prices like "Soup 2.49".</div>
+      <button class="btn btn-secondary" onclick="openReceiptPaste()" style="margin-bottom:8px">Try Again</button>
+      <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+    return;
+  }
+  showReceiptReview(items);
+}
+
+function extractItemsFromText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const items = [];
+
+  // Skip lines that are clearly not items
+  const skipPatterns = [
+    /^(subtotal|sub total|total|tax|gst|hst|pst|vat|change|cash|card|credit|debit|visa|mastercard|amex|balance|thank|receipt|store|date|time|phone|address|www|http|member|rewards|points|your|cashier|register|terminal|auth|approval|ref|item|qty|price|amount|desc)/i,
+    /^\*+$/,
+    /^-+$/,
+    /^=+$/,
+    /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/, // dates
+    /^\d{3}[-.\s]\d{3}[-.\s]\d{4}/, // phone numbers
+    /^#\d+/, // receipt/store numbers
+  ];
+
+  for (const line of lines) {
+    if (skipPatterns.some(p => p.test(line))) continue;
+
+    // Look for a price pattern: digits with a decimal (e.g. 2.49, $8.99, 12.00)
+    // The price can be at the end or anywhere in the line
+    const priceMatch = line.match(/\$?\s*(\d{1,4}\.\d{2})\s*[A-Z]?\s*$/);
+    if (!priceMatch) continue;
+
+    const amount = parseFloat(priceMatch[1]);
+    if (amount <= 0 || amount > 9999) continue; // skip obviously wrong values
+
+    // Item name is everything before the price
+    let name = line.slice(0, line.lastIndexOf(priceMatch[0])).trim();
+    // Clean up common receipt artifacts
+    name = name.replace(/^\d+\s+/, '');        // leading quantity like "2 "
+    name = name.replace(/\s{2,}/g, ' ');       // collapse spaces
+    name = name.replace(/[*#@]+/g, '').trim(); // remove symbols
+    name = name.replace(/\s+\d+$/, '').trim(); // trailing item codes
+
+    if (name.length < 2) continue; // skip if no real name left
+
+    // Title case the name
+    name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
+    const category = guessCategory(name);
+    items.push({ name, amount, category });
+  }
+
+  return items;
+}
+
+// ══════════════════════════════════════════════════
+//  RECEIPT SCANNING (AI / camera)
 // ══════════════════════════════════════════════════
 function openReceiptScanner() {
   const apiKey = getApiKey();
