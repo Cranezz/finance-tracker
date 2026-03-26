@@ -517,7 +517,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.3.2</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.3.3</div>
         <div class="text-xs text-muted">Last updated Mar 2026</div>
       </div>
     </div>
@@ -744,38 +744,60 @@ function processDueBills(d) {
   const currentYM = today.toISOString().slice(0, 7);
   const applied = [];
 
+  const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+
   d.bills.forEach(bill => {
     if (!bill.active) return;
-    const interval = bill.intervalMonths || 1;
-    const toApply = [];
+    const cat = d.categories[bill.category];
+    if (!cat) return;
 
-    if (!bill.lastApplied) {
-      if (todayDay >= bill.dayOfMonth) toApply.push(currentYM);
-    } else {
-      let [y, m] = bill.lastApplied.split('-').map(Number);
-      while (true) {
-        m += interval;
-        while (m > 12) { m -= 12; y++; }
-        const ym = `${y}-${String(m).padStart(2,'0')}`;
-        if (ym > currentYM) break;
-        if (ym === currentYM) { if (todayDay >= bill.dayOfMonth) toApply.push(ym); break; }
-        else toApply.push(ym);
-      }
+    function applyOn(dateStr) {
+      cat.balance = roundCent(cat.balance - bill.amount);
+      if (cat.type === 'spending') d.checkingBalance = roundCent((d.checkingBalance||0) - bill.amount);
+      d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
+      applied.push({ label: bill.label });
     }
 
-    toApply.forEach(ym => {
-      const [yr, mo] = ym.split('-').map(Number);
-      const day = Math.min(bill.dayOfMonth, new Date(yr, mo, 0).getDate());
-      const expDate = `${ym}-${String(day).padStart(2,'0')}`;
-      const cat = d.categories[bill.category];
-      if (cat) {
-        cat.balance = roundCent(cat.balance - bill.amount);
-        if (cat.type === 'spending') d.checkingBalance = roundCent((d.checkingBalance||0) - bill.amount);
-        d.expenses.unshift({ id: uid(), date: expDate, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
-        applied.push({ label: bill.label, month: ym });
+    if (bill.intervalWeeks) {
+      // Weekly-based: apply every N weeks by date
+      if (!bill.lastApplied) {
+        const ds = todayDate.toISOString().split('T')[0];
+        applyOn(ds);
+        bill.lastApplied = ds;
+      } else {
+        let next = new Date(bill.lastApplied + 'T00:00:00');
+        next.setDate(next.getDate() + bill.intervalWeeks * 7);
+        while (next <= todayDate) {
+          const ds = next.toISOString().split('T')[0];
+          applyOn(ds);
+          bill.lastApplied = ds;
+          next.setDate(next.getDate() + bill.intervalWeeks * 7);
+        }
       }
-      bill.lastApplied = ym;
-    });
+    } else {
+      // Month-based: apply on dayOfMonth every N months
+      const interval = bill.intervalMonths || 1;
+      const toApply = [];
+      if (!bill.lastApplied) {
+        if (todayDay >= bill.dayOfMonth) toApply.push(currentYM);
+      } else {
+        let [y, m] = bill.lastApplied.split('-').map(Number);
+        while (true) {
+          m += interval;
+          while (m > 12) { m -= 12; y++; }
+          const ym = `${y}-${String(m).padStart(2,'0')}`;
+          if (ym > currentYM) break;
+          if (ym === currentYM) { if (todayDay >= bill.dayOfMonth) toApply.push(ym); break; }
+          else toApply.push(ym);
+        }
+      }
+      toApply.forEach(ym => {
+        const [yr, mo] = ym.split('-').map(Number);
+        const day = Math.min(bill.dayOfMonth, new Date(yr, mo, 0).getDate());
+        applyOn(`${ym}-${String(day).padStart(2,'0')}`);
+        bill.lastApplied = ym;
+      });
+    }
   });
 
   return { d, applied };
@@ -1020,10 +1042,11 @@ function renderBills() {
         else if (diff === 0) statusHtml = `<span class="bill-status due-today">Due today</span>`;
         else statusHtml = `<span class="bill-status due-today">Overdue</span>`;
         const nextLabel = diff > 0 ? `Next: ${next.toLocaleDateString('en-US',{month:'short',day:'numeric'})}` : '';
+        const dayPart = b.intervalWeeks ? '' : ` · ${ordinal(b.dayOfMonth)}`;
         return `<div class="bill-item">
           <div class="bill-meta">
             <div class="bill-name">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
-            <div class="bill-detail">${freqLabel(b.intervalMonths||1)} · ${ordinal(b.dayOfMonth)}${nextLabel?' · '+nextLabel:''}</div>
+            <div class="bill-detail">${freqLabel(b)}${dayPart}${nextLabel?' · '+nextLabel:''}</div>
           </div>
           <div class="bill-right">
             <div class="bill-amount">-${fmt(b.amount)}</div>
@@ -1045,7 +1068,7 @@ function renderBills() {
         return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
           <div class="sr-label" style="flex:1;min-width:0">
             <div style="font-weight:700">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
-            <div style="font-size:12px;color:var(--text-muted)">${fmt(b.amount)} · ${freqLabel(b.intervalMonths||1)} · ${ordinal(b.dayOfMonth)} · ${cat?.label||b.category}${b.active?'':' · <span style="color:var(--danger)">inactive</span>'}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${fmt(b.amount)} · ${freqLabel(b)}${b.intervalWeeks?'':' · '+ordinal(b.dayOfMonth)} · ${cat?.label||b.category}${b.active?'':' · <span style="color:var(--danger)">inactive</span>'}</div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="openEditBill('${b.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
         </div>`;
@@ -1631,9 +1654,25 @@ function spendingCatOptions(selectedKey) {
   return ALL_KEYS.map(k => `<option value="${k}"${k===selectedKey?' selected':''}>${data.categories[k].icon} ${data.categories[k].label}</option>`).join('');
 }
 
+// freq value format: "w1","w2","w4" for weeks; "m1","m2","m3","m6","m12" for months
+function billFreqValue(bill) {
+  if (bill && bill.intervalWeeks) return 'w' + bill.intervalWeeks;
+  return 'm' + (bill?.intervalMonths || 1);
+}
+function parseFreqValue(val) {
+  if (val.startsWith('w')) return { intervalWeeks: parseInt(val.slice(1)), intervalMonths: null };
+  return { intervalWeeks: null, intervalMonths: parseInt(val.slice(1)) };
+}
 function billFreqOptions(selected) {
-  return [[1,'Monthly'],[2,'Every 2 months'],[3,'Quarterly (every 3 months)'],[6,'Every 6 months'],[12,'Annually']]
-    .map(([v,l]) => `<option value="${v}"${v==selected?' selected':''}>${l}</option>`).join('');
+  return [
+    ['w1','Every week'],['w2','Every 2 weeks'],['w4','Every 4 weeks'],
+    ['m1','Monthly'],['m2','Every 2 months'],['m3','Quarterly (every 3 months)'],['m6','Every 6 months'],['m12','Annually'],
+  ].map(([v,l]) => `<option value="${v}"${v===selected?' selected':''}>${l}</option>`).join('');
+}
+function toggleBillDayField() {
+  const val = document.getElementById('bill-interval')?.value || 'm1';
+  const g = document.getElementById('bill-day-group');
+  if (g) g.style.display = val.startsWith('w') ? 'none' : '';
 }
 
 function openAddBill() {
@@ -1652,10 +1691,10 @@ function openAddBill() {
     <div class="form-group">
       <label class="form-label">Frequency</label>
       <div class="form-select-wrap">
-        <select class="form-select" id="bill-interval">${billFreqOptions(1)}</select>
+        <select class="form-select" id="bill-interval" onchange="toggleBillDayField()">${billFreqOptions('m1')}</select>
       </div>
     </div>
-    <div class="form-group">
+    <div class="form-group" id="bill-day-group">
       <label class="form-label">Day of Month (due date)</label>
       <input class="form-input" type="number" min="1" max="28" placeholder="e.g. 19" id="bill-day">
       <div class="text-xs text-muted mt-8">Enter 1–28. Bills apply automatically when this day arrives.</div>
@@ -1690,12 +1729,12 @@ function openEditBill(id) {
     <div class="form-group">
       <label class="form-label">Frequency</label>
       <div class="form-select-wrap">
-        <select class="form-select" id="bill-interval">${billFreqOptions(bill.intervalMonths||1)}</select>
+        <select class="form-select" id="bill-interval" onchange="toggleBillDayField()">${billFreqOptions(billFreqValue(bill))}</select>
       </div>
     </div>
-    <div class="form-group">
+    <div class="form-group" id="bill-day-group"${bill.intervalWeeks?' style="display:none"':''}>
       <label class="form-label">Day of Month (due date)</label>
-      <input class="form-input" type="number" min="1" max="28" id="bill-day" value="${bill.dayOfMonth}">
+      <input class="form-input" type="number" min="1" max="28" id="bill-day" value="${bill.dayOfMonth||''}">
     </div>
     <div class="form-group">
       <label class="form-label">Category</label>
@@ -1716,23 +1755,25 @@ function openEditBill(id) {
 function submitBill(id) {
   const label = document.getElementById('bill-label')?.value.trim();
   const amount = parseFloat(document.getElementById('bill-amount')?.value);
-  const intervalMonths = parseInt(document.getElementById('bill-interval')?.value) || 1;
-  const day = parseInt(document.getElementById('bill-day')?.value);
+  const freqVal = document.getElementById('bill-interval')?.value || 'm1';
+  const { intervalWeeks, intervalMonths } = parseFreqValue(freqVal);
+  const isWeekly = !!intervalWeeks;
+  const day = isWeekly ? 1 : parseInt(document.getElementById('bill-day')?.value);
   const category = document.getElementById('bill-category')?.value;
   const active = id ? (document.getElementById('bill-active')?.checked !== false) : true;
 
   if (!label) { alert('Enter a bill name'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
-  if (!day || day < 1 || day > 28) { alert('Enter a day between 1 and 28'); return; }
+  if (!isWeekly && (!day || day < 1 || day > 28)) { alert('Enter a day between 1 and 28'); return; }
   if (!category) { alert('Select a category'); return; }
 
   if (!data.bills) data.bills = [];
 
   if (id) {
     const bill = data.bills.find(b => b.id === id);
-    if (bill) { bill.label = label; bill.amount = roundCent(amount); bill.intervalMonths = intervalMonths; bill.dayOfMonth = day; bill.category = category; bill.active = active; }
+    if (bill) { bill.label = label; bill.amount = roundCent(amount); bill.intervalWeeks = intervalWeeks; bill.intervalMonths = intervalMonths; bill.dayOfMonth = day; bill.category = category; bill.active = active; }
   } else {
-    data.bills.push({ id: uid(), label, amount: roundCent(amount), intervalMonths, dayOfMonth: day, category, active: true, lastApplied: null });
+    data.bills.push({ id: uid(), label, amount: roundCent(amount), intervalWeeks, intervalMonths, dayOfMonth: day, category, active: true, lastApplied: null });
   }
 
   saveData(data);
