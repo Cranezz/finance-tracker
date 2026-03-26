@@ -242,6 +242,19 @@
     .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.05em; }
     .badge-accent { background: var(--accent)33; color: var(--accent); }
     .badge-success { background: var(--success)33; color: var(--success); }
+
+    /* Bills */
+    .bill-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .bill-item:last-child { border-bottom: none; }
+    .bill-item .bill-meta { flex: 1; min-width: 0; }
+    .bill-item .bill-name { font-size: 14px; font-weight: 600; }
+    .bill-item .bill-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .bill-item .bill-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .bill-item .bill-amount { font-size: 15px; font-weight: 700; color: var(--danger); white-space: nowrap; }
+    .bill-status { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+    .bill-status.paid { background: var(--success)22; color: var(--success); }
+    .bill-status.due-today { background: var(--danger)22; color: var(--danger); }
+    .bill-status.upcoming { background: var(--warning)22; color: var(--warning); }
   </style>
 </head>
 <body>
@@ -355,8 +368,18 @@
       <!-- Spending buckets -->
       <div class="section-header">
         <div class="section-title">Spending Buckets</div>
+        <div id="spending-total" style="font-size:15px;font-weight:700"></div>
       </div>
       <div class="cat-grid" id="dash-spending"></div>
+
+      <!-- Bills -->
+      <div class="section-header mt-12">
+        <div class="section-title">Monthly Bills</div>
+        <button class="btn btn-secondary btn-sm" onclick="openAddBill()" style="padding:6px 12px;font-size:13px">+ Add</button>
+      </div>
+      <div class="card" style="padding:0 16px">
+        <div id="dash-bills"><div class="empty-state" style="padding:16px 0">No bills set up yet</div></div>
+      </div>
 
       <!-- Log expense -->
       <div class="card">
@@ -454,6 +477,16 @@
         </div>
       </div>
 
+      <!-- Bills management -->
+      <div class="card">
+        <div class="card-title">💸 Monthly Bills</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Auto-applied as expenses on their due date each month.</div>
+        <div id="settings-bills"></div>
+        <div class="mt-12">
+          <button class="btn btn-secondary" onclick="openAddBill()">+ Add Bill</button>
+        </div>
+      </div>
+
       <!-- Balances -->
       <div class="card">
         <div class="card-title">Adjust Savings Balances</div>
@@ -484,8 +517,8 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.2.24</div>
-        <div class="text-xs text-muted">Last updated Feb 2026</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.3.26</div>
+        <div class="text-xs text-muted">Last updated Mar 2026</div>
       </div>
     </div>
   </main>
@@ -552,7 +585,13 @@ function freshData() {
     expenses: [],
     checkingBalance: 0,
     transfers: [], // { paycheckId, items: [{key, amount, checked}] }
+    bills: [],     // { id, label, amount, dayOfMonth, category, active, lastApplied: 'YYYY-MM'|null }
   };
+}
+
+function migrateData(d) {
+  if (!d.bills) d.bills = [];
+  return d;
 }
 function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
 function setApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
@@ -645,6 +684,74 @@ function avgPaycheckAlloc(d, catKey, n=4) {
   return recent.reduce((s,p) => s+(p.splits[catKey]||0), 0) / recent.length;
 }
 
+// Time-based weekly savings rate — more accurate than per-paycheck average
+// because it accounts for extra cash injected between paychecks
+function weeklyAllocRate(d, catKey) {
+  const paychecks = d.paychecks;
+  if (!paychecks.length) return 0;
+  if (paychecks.length === 1) return paychecks[0].splits[catKey] || 0;
+
+  // Use up to 52 weeks of history
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 365);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const relevant = paychecks.filter(p => p.date >= cutoffStr);
+  const pool = relevant.length >= 2 ? relevant : paychecks.slice(0, Math.min(paychecks.length, 8));
+
+  const totalAlloc = pool.reduce((s, p) => s + (p.splits[catKey] || 0), 0);
+  if (pool.length === 1) return totalAlloc;
+
+  const times = pool.map(p => new Date(p.date + 'T12:00:00').getTime());
+  const daysDiff = (Math.max(...times) - Math.min(...times)) / 86400000;
+  if (daysDiff < 3) return totalAlloc; // All same-day — count as one week
+  return totalAlloc / (daysDiff / 7);
+}
+
+// Process bills that are due — called on init to auto-apply missed/due bills
+function processDueBills(d) {
+  if (!d.bills || !d.bills.length) return { d, applied: [] };
+  const today = new Date();
+  const todayDay = today.getDate();
+  const currentYM = today.toISOString().slice(0, 7);
+  const applied = [];
+
+  d.bills.forEach(bill => {
+    if (!bill.active) return;
+    const monthsToApply = [];
+    const last = bill.lastApplied || null;
+
+    if (!last) {
+      if (todayDay >= bill.dayOfMonth) monthsToApply.push(currentYM);
+    } else {
+      let [y, m] = last.split('-').map(Number);
+      m++; if (m > 12) { m = 1; y++; }
+      while (true) {
+        const ym = `${y}-${String(m).padStart(2,'0')}`;
+        if (ym > currentYM) break;
+        if (ym === currentYM) { if (todayDay >= bill.dayOfMonth) monthsToApply.push(ym); }
+        else monthsToApply.push(ym);
+        m++; if (m > 12) { m = 1; y++; }
+      }
+    }
+
+    monthsToApply.forEach(ym => {
+      const [yr, mo] = ym.split('-').map(Number);
+      const day = Math.min(bill.dayOfMonth, new Date(yr, mo, 0).getDate());
+      const expDate = `${ym}-${String(day).padStart(2,'0')}`;
+      const cat = d.categories[bill.category];
+      if (cat) {
+        cat.balance = roundCent(cat.balance - bill.amount);
+        if (cat.type === 'spending') d.checkingBalance = roundCent((d.checkingBalance||0) - bill.amount);
+        d.expenses.unshift({ id: uid(), date: expDate, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
+        applied.push({ label: bill.label, month: ym });
+      }
+      bill.lastApplied = ym;
+    });
+  });
+
+  return { d, applied };
+}
+
 // ══════════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════════
@@ -660,6 +767,7 @@ function renderAll() {
   renderPaychecks();
   renderGoals();
   renderSettings();
+  renderBills();
 }
 
 function renderHeader() {
@@ -711,6 +819,15 @@ function renderDashboard() {
       <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
     </div>`;
   }).join('');
+
+  // Spending total
+  const spendTotal = roundCent(SPENDING_KEYS.reduce((s,k) => s + (data.categories[k]?.balance||0), 0));
+  const stEl = document.getElementById('spending-total');
+  stEl.textContent = fmt(spendTotal);
+  stEl.style.color = spendTotal < 0 ? 'var(--danger)' : 'var(--success)';
+
+  // Bills
+  renderBills();
 
   // Recent expenses
   const expList = document.getElementById('dash-expenses');
@@ -810,7 +927,7 @@ function renderGoals() {
     const bal = Math.max(0, cat.balance);
     const pct = cat.goal ? Math.min(100, Math.round((bal/cat.goal)*100)) : 100;
     const remaining = cat.goal ? Math.max(0, cat.goal - cat.balance) : 0;
-    const avg = avgPaycheckAlloc(data, k);
+    const avg = weeklyAllocRate(data, k);
     const eta = avg>0 && remaining>0 ? Math.ceil(remaining/avg) : null;
     const badgeClass = cat.goalMet ? 'done' : '';
     const badgeText = cat.goalMet ? '✓ GOAL MET' : `${pct}%`;
@@ -844,6 +961,67 @@ function renderGoals() {
       ${isNeg?'<div class="text-sm text-danger" style="margin-top:6px">⚠️ Over budget — this carries forward</div>':''}
     </div>`;
   }).join('');
+}
+
+// ── Bills ───────────────────────────────────────────────
+function ordinal(n) {
+  const s = ['th','st','nd','rd'], v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+
+function renderBills() {
+  const bills = data.bills || [];
+  const today = new Date();
+  const todayDay = today.getDate();
+  const currentYM = today.toISOString().slice(0, 7);
+
+  // Dashboard bills list
+  const dashEl = document.getElementById('dash-bills');
+  if (dashEl) {
+    if (!bills.length) {
+      dashEl.innerHTML = '<div class="empty-state" style="padding:16px 0">No bills set up yet</div>';
+    } else {
+      dashEl.innerHTML = bills.filter(b=>b.active).map(b => {
+        const cat = data.categories[b.category];
+        const paid = b.lastApplied === currentYM;
+        const dueToday = !paid && todayDay === b.dayOfMonth;
+        const overdue = !paid && todayDay > b.dayOfMonth;
+        let statusHtml;
+        if (paid) statusHtml = `<span class="bill-status paid">✓ Paid</span>`;
+        else if (dueToday || overdue) statusHtml = `<span class="bill-status due-today">Due ${overdue?'overdue':'today'}</span>`;
+        else statusHtml = `<span class="bill-status upcoming">Due ${ordinal(b.dayOfMonth)}</span>`;
+        return `<div class="bill-item">
+          <div class="bill-meta">
+            <div class="bill-name">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
+            <div class="bill-detail">${cat?.label||b.category} · ${ordinal(b.dayOfMonth)} of each month</div>
+          </div>
+          <div class="bill-right">
+            <div class="bill-amount">-${fmt(b.amount)}</div>
+            ${statusHtml}
+          </div>
+        </div>`;
+      }).join('') || '<div class="empty-state" style="padding:16px 0">No active bills</div>';
+    }
+  }
+
+  // Settings bills list
+  const settingsEl = document.getElementById('settings-bills');
+  if (settingsEl) {
+    if (!bills.length) {
+      settingsEl.innerHTML = '<div class="empty-state">No bills yet</div>';
+    } else {
+      settingsEl.innerHTML = bills.map(b => {
+        const cat = data.categories[b.category];
+        return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
+          <div class="sr-label" style="flex:1;min-width:0">
+            <div style="font-weight:700">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${fmt(b.amount)} · ${ordinal(b.dayOfMonth)} · ${cat?.label||b.category}${b.active?'':' · <span style="color:var(--danger)">inactive</span>'}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="openEditBill('${b.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
+        </div>`;
+      }).join('');
+    }
+  }
 }
 
 // ── Settings ────────────────────────────────────────────
@@ -1417,6 +1595,112 @@ function submitReceiptItems(count) {
 }
 
 // ══════════════════════════════════════════════════
+//  BILL MANAGEMENT
+// ══════════════════════════════════════════════════
+function spendingCatOptions(selectedKey) {
+  return ALL_KEYS.map(k => `<option value="${k}"${k===selectedKey?' selected':''}>${data.categories[k].icon} ${data.categories[k].label}</option>`).join('');
+}
+
+function openAddBill() {
+  document.getElementById('modal-title').textContent = 'Add Monthly Bill';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Bill Name / Label</label>
+      <input class="form-input" type="text" id="bill-label" placeholder="e.g. Netflix, Gym, Car Insurance" maxlength="40">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Monthly Amount</label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="bill-amount">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Day of Month (due date)</label>
+      <input class="form-input" type="number" min="1" max="28" placeholder="e.g. 19" id="bill-day">
+      <div class="text-xs text-muted mt-8">Enter 1–28. Bills apply automatically when this day arrives.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category (which bucket to subtract from)</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="bill-category">${spendingCatOptions('misc')}</select>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="submitBill(null)">Save Bill</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  setTimeout(() => { const i = document.getElementById('bill-label'); if(i) i.focus(); }, 100);
+}
+
+function openEditBill(id) {
+  const bill = (data.bills||[]).find(b => b.id === id);
+  if (!bill) return;
+  document.getElementById('modal-title').textContent = 'Edit Bill';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Bill Name / Label</label>
+      <input class="form-input" type="text" id="bill-label" value="${escHtml(bill.label)}" maxlength="40">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Monthly Amount</label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" min="0.01" step="0.01" id="bill-amount" value="${bill.amount.toFixed(2)}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Day of Month (due date)</label>
+      <input class="form-input" type="number" min="1" max="28" id="bill-day" value="${bill.dayOfMonth}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="bill-category">${spendingCatOptions(bill.category)}</select>
+      </div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:12px">
+      <label class="form-label" style="margin:0">Active</label>
+      <input type="checkbox" id="bill-active" style="width:20px;height:20px;accent-color:var(--accent)" ${bill.active?'checked':''}>
+    </div>
+    <button class="btn btn-primary" onclick="submitBill('${id}')">Save Changes</button>
+    <div class="mt-8"><button class="btn btn-danger" onclick="deleteBill('${id}')">Delete Bill</button></div>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function submitBill(id) {
+  const label = document.getElementById('bill-label')?.value.trim();
+  const amount = parseFloat(document.getElementById('bill-amount')?.value);
+  const day = parseInt(document.getElementById('bill-day')?.value);
+  const category = document.getElementById('bill-category')?.value;
+  const active = id ? (document.getElementById('bill-active')?.checked !== false) : true;
+
+  if (!label) { alert('Enter a bill name'); return; }
+  if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
+  if (!day || day < 1 || day > 28) { alert('Enter a day between 1 and 28'); return; }
+  if (!category) { alert('Select a category'); return; }
+
+  if (!data.bills) data.bills = [];
+
+  if (id) {
+    const bill = data.bills.find(b => b.id === id);
+    if (bill) { bill.label = label; bill.amount = roundCent(amount); bill.dayOfMonth = day; bill.category = category; bill.active = active; }
+  } else {
+    data.bills.push({ id: uid(), label, amount: roundCent(amount), dayOfMonth: day, category, active: true, lastApplied: null });
+  }
+
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+function deleteBill(id) {
+  if (!confirm('Delete this bill?')) return;
+  data.bills = (data.bills||[]).filter(b => b.id !== id);
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════
 //  SETTINGS ACTIONS
 // ══════════════════════════════════════════════════
 function saveApiKey() {
@@ -1529,10 +1813,14 @@ if ('serviceWorker' in navigator) {
 // ══════════════════════════════════════════════════
 function init() {
   data = loadData() || freshData();
+  data = migrateData(data);
   if (!data.setupComplete) {
     showSetup();
   } else {
     hideSetup();
+    const { d, applied } = processDueBills(data);
+    data = d;
+    if (applied.length) saveData(data);
     renderAll();
   }
 }
