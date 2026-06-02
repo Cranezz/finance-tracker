@@ -1153,23 +1153,30 @@ function renderBills() {
         const daysUntil = Math.round((next - now) / 86400000);
         const nextLabel = next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
+        // How far are we through this billing cycle?
+        const periodDays = b.intervalWeeks ? b.intervalWeeks * 7 : (b.intervalMonths || 1) * (365.25 / 12);
+        const daysElapsed = Math.max(0, Math.min(periodDays, periodDays - daysUntil));
+        const expectedReserve = roundCent(b.amount * (daysElapsed / periodDays));
+
         // Status badge
         let statusHtml;
         if (pct >= 100) {
           statusHtml = `<span class="bill-status-ready">Ready!</span>`;
-        } else if (daysUntil <= 7 && daysUntil >= 0) {
-          statusHtml = `<span class="bill-status-due">Due Soon</span>`;
         } else if (daysUntil < 0) {
           statusHtml = `<span class="bill-status-behind">Overdue</span>`;
-        } else if (pct >= 40) {
+        } else if (daysUntil <= 7) {
+          statusHtml = `<span class="bill-status-due">Due Soon</span>`;
+        } else if (reserve === 0 && expectedReserve <= 1) {
+          // Just started the cycle — grace period, saving is beginning
+          statusHtml = `<span class="bill-status-ontrack">Saving</span>`;
+        } else if (reserve >= expectedReserve * 0.9) {
           statusHtml = `<span class="bill-status-ontrack">On Track</span>`;
         } else {
           statusHtml = `<span class="bill-status-behind">Behind</span>`;
         }
 
-        // Per-paycheck contribution label (based on weekly rate)
-        const weeklyRate = billWeeklyContribution(b);
-        const perPaycheck = roundCent(weeklyRate * 7); // approximate weekly amount
+        // Per-paycheck contribution label — weeklyRate is already $/week, no extra multiply needed
+        const weeklyRate = roundCent(billWeeklyContribution(b));
 
         return `<div class="bill-fund-item">
           <div class="bill-fund-header">
@@ -1183,7 +1190,7 @@ function renderBills() {
             <div class="progress-fill${pct>=100?' done':''}" style="width:${pct}%;${pct<100?'background:var(--warning)':''}"></div>
           </div>
           <div class="bill-fund-meta">
-            Due ${daysUntil < 0 ? 'was' : ''} ${nextLabel}${daysUntil >= 0 ? ` · ${daysUntil}d away` : ''} · <span>~${fmt(perPaycheck)}/week set aside</span>
+            Due ${daysUntil < 0 ? 'was' : ''} ${nextLabel}${daysUntil >= 0 ? ` · ${daysUntil}d away` : ''} · <span>~${fmt(weeklyRate)}/week set aside</span>
           </div>
         </div>`;
       }).join('');
@@ -2037,6 +2044,12 @@ function renderAnalytics() {
   }
 }
 
+// Compact dollar label for charts: $1.3k or $123
+function fmtC(n) {
+  if (n >= 1000) return '$' + (n / 1000).toFixed(1) + 'k';
+  return '$' + Math.round(n);
+}
+
 function renderMonthlyChart(expenses) {
   const el = document.getElementById('analytics-monthly');
   if (!el) return;
@@ -2060,7 +2073,7 @@ function renderMonthlyChart(expenses) {
   const months = Object.entries(monthly).sort(([a],[b]) => a.localeCompare(b));
   if (!months.length) { el.innerHTML = '<div class="empty-state">No data in range</div>'; return; }
 
-  const W = Math.max(280, months.length * 44), H = 130, padB = 24, padT = 10;
+  const W = Math.max(280, months.length * 44), H = 150, padB = 24, padT = 20;
   const max = Math.max(...months.map(([,v]) => v)) || 1;
   const bw = Math.floor((W / months.length) * 0.65);
   const gap = Math.floor(W / months.length);
@@ -2068,11 +2081,15 @@ function renderMonthlyChart(expenses) {
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   const bars = months.map(([ym, v], i) => {
-    const bh = Math.max(3, Math.round(((H - padB - padT) * v) / max));
+    const bh = Math.max(4, Math.round(((H - padB - padT) * v) / max));
     const x = Math.round(i * gap + (gap - bw) / 2);
     const y = H - padB - bh;
     const [, mo] = ym.split('-').map(Number);
-    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--danger)" opacity="0.75"/>
+    const label = fmtC(v);
+    // onclick shows full amount as alert on mobile
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--danger)" opacity="0.8"
+              onclick="alert('${MONTH_NAMES[mo-1]}: ${fmt(v)}')" style="cursor:pointer"/>
+            <text x="${x + bw/2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="var(--text-muted)" font-weight="600">${label}</text>
             <text x="${x + bw/2}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${MONTH_NAMES[mo-1]}</text>`;
   }).join('');
 
@@ -2085,19 +2102,23 @@ function renderPaycheckChart(paychecks) {
   if (!paychecks.length) { el.innerHTML = '<div class="empty-state">No paychecks yet</div>'; return; }
 
   const items = paychecks.slice().reverse().slice(-12);
-  const W = Math.max(280, items.length * 44), H = 130, padB = 24, padT = 10;
+  const W = Math.max(280, items.length * 44), H = 150, padB = 24, padT = 20;
   const max = Math.max(...items.map(p => p.grossAmount)) || 1;
   const bw = Math.floor((W / items.length) * 0.65);
   const gap = Math.floor(W / items.length);
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   const bars = items.map((p, i) => {
-    const bh = Math.max(3, Math.round(((H - padB - padT) * p.grossAmount) / max));
+    const bh = Math.max(4, Math.round(((H - padB - padT) * p.grossAmount) / max));
     const x = Math.round(i * gap + (gap - bw) / 2);
     const y = H - padB - bh;
     const [, mo, day] = p.date.split('-').map(Number);
-    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--success)" opacity="0.75"/>
-            <text x="${x + bw/2}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${MONTH_NAMES[mo-1]} ${day}</text>`;
+    const dateLabel = MONTH_NAMES[mo-1] + ' ' + day;
+    const label = fmtC(p.grossAmount);
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--success)" opacity="0.8"
+              onclick="alert('${dateLabel}: ${fmt(p.grossAmount)}')" style="cursor:pointer"/>
+            <text x="${x + bw/2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="var(--text-muted)" font-weight="600">${label}</text>
+            <text x="${x + bw/2}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${dateLabel}</text>`;
   }).join('');
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:${W}px;height:auto">${bars}</svg>`;
