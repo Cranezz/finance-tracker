@@ -1159,20 +1159,24 @@ function renderBills() {
         const expectedReserve = roundCent(b.amount * (daysElapsed / periodDays));
 
         // Status badge
+        // Rule: never show "Behind" if there's still meaningful time left —
+        // the user is either saving toward the bill or already on track.
         let statusHtml;
         if (pct >= 100) {
           statusHtml = `<span class="bill-status-ready">Ready!</span>`;
         } else if (daysUntil < 0) {
           statusHtml = `<span class="bill-status-behind">Overdue</span>`;
         } else if (daysUntil <= 7) {
-          statusHtml = `<span class="bill-status-due">Due Soon</span>`;
-        } else if (reserve === 0 && expectedReserve <= 1) {
-          // Just started the cycle — grace period, saving is beginning
-          statusHtml = `<span class="bill-status-ontrack">Saving</span>`;
+          // Only last-week urgency uses the warning colour
+          statusHtml = pct >= 75
+            ? `<span class="bill-status-ontrack">Due Soon</span>`
+            : `<span class="bill-status-due">Due Soon!</span>`;
         } else if (reserve >= expectedReserve * 0.9) {
+          // Ahead of (or at) expected pace for this point in the cycle
           statusHtml = `<span class="bill-status-ontrack">On Track</span>`;
         } else {
-          statusHtml = `<span class="bill-status-behind">Behind</span>`;
+          // Still building — there's time, no reason to alarm the user
+          statusHtml = `<span class="bill-status-ontrack">Saving</span>`;
         }
 
         // Per-paycheck contribution label — weeklyRate is already $/week, no extra multiply needed
