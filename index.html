@@ -546,7 +546,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.1</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.2</div>
         <div class="text-xs text-muted">Last updated Jun 2026</div>
       </div>
     </div>
@@ -817,16 +817,27 @@ function daysSinceLastPaycheck(d) {
   return Math.max(1, diff);
 }
 
-// Weekly contribution needed per bill (bill amount / billing period in weeks)
+// Weekly contribution needed — dynamically based on what's still needed and how many days remain.
+// This means a bill 8 days away gets a higher weekly rate than a bill 60 days away,
+// so the reserve is always fully funded exactly by the due date.
 function billWeeklyContribution(bill) {
-  if (bill.intervalWeeks) return bill.amount / bill.intervalWeeks;
-  const months = bill.intervalMonths || 1;
-  return bill.amount / (months * (365.25 / 12 / 7));
+  const reserve = bill.reserveBalance || 0;
+  const needed = Math.max(0, bill.amount - reserve);
+  if (needed <= 0) return 0;
+  const next = billNextDueDate(bill);
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  next.setHours(12, 0, 0, 0);
+  const daysUntil = Math.max(1, Math.round((next - today) / 86400000));
+  return needed / (daysUntil / 7); // $/week required to hit the target by due date
 }
 
 // Per-paycheck contribution for a bill given days since last paycheck
 function billPaycheckContribution(bill, days) {
-  return roundCent(billWeeklyContribution(bill) * (days / 7));
+  const contrib = roundCent(billWeeklyContribution(bill) * (days / 7));
+  // Never contribute more than what's still needed
+  const needed = Math.max(0, bill.amount - (bill.reserveBalance || 0));
+  return Math.min(contrib, needed);
 }
 
 // Process bills that are due — called on init to auto-apply missed/due bills
@@ -868,9 +879,8 @@ function processDueBills(d) {
     if (bill.intervalWeeks) {
       // Weekly-based: apply every N weeks by date
       if (!bill.lastApplied) {
-        const ds = todayDate.toISOString().split('T')[0];
-        applyOn(ds);
-        bill.lastApplied = ds;
+        // New bill — start the cycle from today without charging anything
+        bill.lastApplied = todayDate.toISOString().split('T')[0];
       } else {
         let next = new Date(bill.lastApplied + 'T00:00:00');
         next.setDate(next.getDate() + bill.intervalWeeks * 7);
@@ -886,7 +896,19 @@ function processDueBills(d) {
       const interval = bill.intervalMonths || 1;
       const toApply = [];
       if (!bill.lastApplied) {
-        if (todayDay >= bill.dayOfMonth) toApply.push(currentYM);
+        // New bill — initialize lastApplied so the next due date is correct,
+        // but never charge anything automatically for current/past periods.
+        if (todayDay < bill.dayOfMonth) {
+          // Due date is still ahead this month — anchor to last month so next due = this month
+          let prevM = today.getMonth(); // JS 0-indexed: June=5 → "5" = May in 1-indexed ✓
+          let prevY = today.getFullYear();
+          if (prevM === 0) { prevM = 12; prevY--; }
+          bill.lastApplied = `${prevY}-${String(prevM).padStart(2,'0')}`;
+        } else {
+          // Due date already passed this month — anchor to current month so next due = next month
+          bill.lastApplied = currentYM;
+        }
+        // Don't push to toApply — no charge on first setup
       } else {
         let [y, m] = bill.lastApplied.split('-').map(Number);
         while (true) {
@@ -1057,14 +1079,18 @@ function renderPaychecks() {
         <td>${fmt(lastP.splits[k]||0)}</td>
       </tr>`;
     }).join('');
-    const billContribLine = lastP.billContributionsTotal > 0
-      ? `<tr><td style="color:var(--warning)">💸 Bill Reserves</td><td></td><td style="color:var(--warning)">-${fmt(lastP.billContributionsTotal)}</td></tr>`
-      : '';
+    const billContribTotal = roundCent(lastP.billContributionsTotal || 0);
+    const remainingAfterBills = roundCent(lastP.grossAmount - billContribTotal);
+    const billContribLine = `<tr>
+      <td style="color:var(--warning)">💸 Bill Reserves</td>
+      <td></td>
+      <td style="color:var(--warning)">${billContribTotal > 0 ? '-' : ''}${fmt(billContribTotal)}</td>
+    </tr>`;
     bContent.innerHTML = `
       <div style="margin-bottom:12px">
         <div style="font-size:20px;font-weight:800">${fmt(lastP.grossAmount)}</div>
         <div class="text-sm text-muted">${fmtDate(lastP.date)}</div>
-        ${lastP.billContributionsTotal > 0 ? `<div class="text-xs text-muted" style="margin-top:4px">Split from ${fmt(roundCent(lastP.grossAmount - lastP.billContributionsTotal))} after bill reserves</div>` : ''}
+        <div class="text-xs text-muted" style="margin-top:4px">${fmt(remainingAfterBills)} split by % after bill reserves</div>
       </div>
       <table class="split-table">${billContribLine}${rows}</table>`;
   } else {
@@ -1153,48 +1179,22 @@ function renderBills() {
         const daysUntil = Math.round((next - now) / 86400000);
         const nextLabel = next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-        // How far are we through this billing cycle?
-        const periodDays = b.intervalWeeks ? b.intervalWeeks * 7 : (b.intervalMonths || 1) * (365.25 / 12);
-        const daysElapsed = Math.max(0, Math.min(periodDays, periodDays - daysUntil));
-        const expectedReserve = roundCent(b.amount * (daysElapsed / periodDays));
-
-        // Status badge
-        // Rule: never show "Behind" if there's still meaningful time left —
-        // the user is either saving toward the bill or already on track.
-        let statusHtml;
-        if (pct >= 100) {
-          statusHtml = `<span class="bill-status-ready">Ready!</span>`;
-        } else if (daysUntil < 0) {
-          statusHtml = `<span class="bill-status-behind">Overdue</span>`;
-        } else if (daysUntil <= 7) {
-          // Only last-week urgency uses the warning colour
-          statusHtml = pct >= 75
-            ? `<span class="bill-status-ontrack">Due Soon</span>`
-            : `<span class="bill-status-due">Due Soon!</span>`;
-        } else if (reserve >= expectedReserve * 0.9) {
-          // Ahead of (or at) expected pace for this point in the cycle
-          statusHtml = `<span class="bill-status-ontrack">On Track</span>`;
-        } else {
-          // Still building — there's time, no reason to alarm the user
-          statusHtml = `<span class="bill-status-ontrack">Saving</span>`;
-        }
-
-        // Per-paycheck contribution label — weeklyRate is already $/week, no extra multiply needed
+        // Per-week amount needed from now until the due date
         const weeklyRate = roundCent(billWeeklyContribution(b));
 
         return `<div class="bill-fund-item">
           <div class="bill-fund-header">
             <div class="bill-fund-name">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
-            ${statusHtml}
+            <div style="font-size:12px;color:var(--text-muted)">${nextLabel} · ${daysUntil >= 0 ? daysUntil + 'd away' : 'past due'}</div>
           </div>
           <div class="bill-fund-amounts">
             <strong>${fmt(reserve)}</strong> saved of <strong>${fmt(b.amount)}</strong> needed
           </div>
-          <div class="progress-bar">
+          <div class="progress-bar" style="margin-bottom:5px">
             <div class="progress-fill${pct>=100?' done':''}" style="width:${pct}%;${pct<100?'background:var(--warning)':''}"></div>
           </div>
           <div class="bill-fund-meta">
-            Due ${daysUntil < 0 ? 'was' : ''} ${nextLabel}${daysUntil >= 0 ? ` · ${daysUntil}d away` : ''} · <span>~${fmt(weeklyRate)}/week set aside</span>
+            <span>~${fmt(weeklyRate)}/week set aside to be ready in time</span>
           </div>
         </div>`;
       }).join('');
