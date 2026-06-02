@@ -546,7 +546,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.3</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.4</div>
         <div class="text-xs text-muted">Last updated Jun 2026</div>
       </div>
     </div>
@@ -649,10 +649,25 @@ function freshData() {
 
 function migrateData(d) {
   if (!d.bills) d.bills = [];
+  const _today = new Date();
+  const _todayDay = _today.getDate();
+  const _currentYM = _today.toISOString().slice(0, 7);
+
   d.bills.forEach(b => {
     if (!b.intervalMonths && !b.intervalWeeks) b.intervalMonths = 1;
     if (b.reserveBalance === undefined) b.reserveBalance = 0;
+
+    // Auto-fix: if a monthly bill's lastApplied is the current month but the due
+    // date hasn't arrived yet, the bill was incorrectly marked as paid. Reset it
+    // to last month so the correct next-due date is recalculated.
+    if (b.intervalMonths && b.lastApplied === _currentYM && b.dayOfMonth && _todayDay < b.dayOfMonth) {
+      let prevM = _today.getMonth(); // JS 0-indexed; coincidentally = previous month in 1-indexed
+      let prevY = _today.getFullYear();
+      if (prevM === 0) { prevM = 12; prevY--; }
+      b.lastApplied = `${prevY}-${String(prevM).padStart(2,'0')}`;
+    }
   });
+
   if (!d.transfers) d.transfers = [];
   return d;
 }
@@ -1922,6 +1937,7 @@ function openEditBill(id) {
       <input type="checkbox" id="bill-active" style="width:20px;height:20px;accent-color:var(--accent)" ${bill.active?'checked':''}>
     </div>
     <button class="btn btn-primary" onclick="submitBill('${id}')">Save Changes</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="resetBillDueDate('${id}')">🔄 Reset Due Date</button></div>
     <div class="mt-8"><button class="btn btn-danger" onclick="deleteBill('${id}')">Delete Bill</button></div>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
@@ -1962,6 +1978,22 @@ function deleteBill(id) {
   saveData(data);
   hideModal();
   renderAll();
+}
+
+function resetBillDueDate(id) {
+  const bill = (data.bills||[]).find(b => b.id === id);
+  if (!bill) return;
+  // Clear lastApplied — processDueBills will recalculate the correct anchor on next load
+  bill.lastApplied = null;
+  bill.reserveBalance = 0;
+  saveData(data);
+  // Re-run processDueBills so the anchor is set immediately (without charging)
+  const { d } = processDueBills(data);
+  data = d;
+  saveData(data);
+  hideModal();
+  renderAll();
+  alert('Due date reset! The next due date has been recalculated from today.');
 }
 
 // ══════════════════════════════════════════════════
