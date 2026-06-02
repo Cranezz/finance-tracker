@@ -66,14 +66,14 @@
     /* Nav */
     #nav {
       flex-shrink: 0; background: var(--surface); border-top: 1px solid var(--border);
-      display: grid; grid-template-columns: repeat(4, 1fr);
+      display: grid; grid-template-columns: repeat(5, 1fr);
       padding-bottom: env(safe-area-inset-bottom, 0);
       height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0));
     }
     .nav-btn {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 4px; background: none; color: var(--text-dim); padding: 8px 4px;
-      font-size: 11px; font-weight: 500; transition: color 0.15s;
+      gap: 3px; background: none; color: var(--text-dim); padding: 6px 2px;
+      font-size: 10px; font-weight: 500; transition: color 0.15s;
     }
     .nav-btn .nav-icon { font-size: 22px; line-height: 1; }
     .nav-btn.active { color: var(--accent); }
@@ -255,6 +255,35 @@
     .bill-status.paid { background: var(--success)22; color: var(--success); }
     .bill-status.due-today { background: var(--danger)22; color: var(--danger); }
     .bill-status.upcoming { background: var(--warning)22; color: var(--warning); }
+
+    /* Bill Sinking Fund redesign */
+    .bill-fund-item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .bill-fund-item:last-child { border-bottom: none; }
+    .bill-fund-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .bill-fund-name { font-size: 14px; font-weight: 700; }
+    .bill-fund-amounts { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .bill-fund-amounts strong { color: var(--text); }
+    .bill-fund-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
+    .bill-fund-meta span { color: var(--accent); font-weight: 600; }
+    .bill-status-ready { background: var(--success)22; color: var(--success); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+    .bill-status-ontrack { background: var(--accent)22; color: var(--accent); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+    .bill-status-behind { background: var(--danger)22; color: var(--danger); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+    .bill-status-due { background: var(--warning)22; color: var(--warning); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+
+    /* Analytics */
+    .analytics-section-title { font-size: 15px; font-weight: 700; margin-bottom: 10px; margin-top: 4px; }
+    .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .chart-wrap svg { display: block; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 12px; }
+    .stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 6px; }
+    .stat-value { font-size: 20px; font-weight: 800; }
+    .analytics-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+    .cat-bar-row { margin-bottom: 10px; }
+    .cat-bar-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+    .cat-bar-label span:last-child { font-weight: 700; }
+    .timeline-filter { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tl-btn { padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+    .tl-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   </style>
 </head>
 <body>
@@ -374,7 +403,7 @@
 
       <!-- Bills -->
       <div class="section-header mt-12">
-        <div class="section-title">Monthly Bills</div>
+        <div class="section-title">Bills & Sinking Funds</div>
         <button class="btn btn-secondary btn-sm" onclick="openAddBill()" style="padding:6px 12px;font-size:13px">+ Add</button>
       </div>
       <div class="card" style="padding:0 16px">
@@ -479,8 +508,8 @@
 
       <!-- Bills management -->
       <div class="card">
-        <div class="card-title">💸 Monthly Bills</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">Auto-applied as expenses on their due date each month.</div>
+        <div class="card-title">💸 Bills & Sinking Funds</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Each paycheck automatically sets aside a fraction of each bill so you're never surprised. The full bill is paid from the reserve when due.</div>
         <div id="settings-bills"></div>
         <div class="mt-12">
           <button class="btn btn-secondary" onclick="openAddBill()">+ Add Bill</button>
@@ -517,8 +546,36 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.3.3</div>
-        <div class="text-xs text-muted">Last updated Mar 2026</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.1</div>
+        <div class="text-xs text-muted">Last updated Jun 2026</div>
+      </div>
+    </div>
+    <!-- Tab 4: Analytics -->
+    <div id="tab-4" class="tab-content">
+      <div class="analytics-grid" id="analytics-stats"></div>
+
+      <div class="card">
+        <div class="card-title">Spending by Category</div>
+        <div id="analytics-by-category"><div class="empty-state">No expenses yet</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Monthly Spending</div>
+        <div class="timeline-filter" id="analytics-filter">
+          <button class="tl-btn active" onclick="setAnalyticsFilter('spending','6m',this)">6 Mo</button>
+          <button class="tl-btn" onclick="setAnalyticsFilter('spending','all',this)">All</button>
+        </div>
+        <div class="chart-wrap" id="analytics-monthly"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Paycheck History</div>
+        <div class="chart-wrap" id="analytics-paychecks"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Recent Transactions</div>
+        <div id="analytics-recent"></div>
       </div>
     </div>
   </main>
@@ -528,6 +585,7 @@
     <button class="nav-btn" onclick="switchTab(1)" data-tab="1"><span class="nav-icon">💵</span><span>Paychecks</span></button>
     <button class="nav-btn" onclick="switchTab(2)" data-tab="2"><span class="nav-icon">🎯</span><span>Goals</span></button>
     <button class="nav-btn" onclick="switchTab(3)" data-tab="3"><span class="nav-icon">⚙️</span><span>Settings</span></button>
+    <button class="nav-btn" onclick="switchTab(4)" data-tab="4"><span class="nav-icon">📊</span><span>Analytics</span></button>
   </nav>
 </div>
 
@@ -593,7 +651,9 @@ function migrateData(d) {
   if (!d.bills) d.bills = [];
   d.bills.forEach(b => {
     if (!b.intervalMonths && !b.intervalWeeks) b.intervalMonths = 1;
+    if (b.reserveBalance === undefined) b.reserveBalance = 0;
   });
+  if (!d.transfers) d.transfers = [];
   return d;
 }
 function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
@@ -632,41 +692,54 @@ function resolvePercents(cats) {
 }
 
 // ══════════════════════════════════════════════════
-//  PAYCHECK PROCESSING (no rollover — buckets keep balance)
+//  PAYCHECK PROCESSING
+//  1. Bill sinking-fund contributions come off the top
+//  2. Remainder split by % — spending categories credited immediately
+//  3. Savings categories credited only when transfer checkbox is checked
+//  4. Full gross goes to checking; savings reduce checking when transferred
 // ══════════════════════════════════════════════════
 function processNewPaycheck(d, grossAmount) {
+  // Step 1: accumulate bill reserve contributions (prorated for days since last paycheck)
+  const days = daysSinceLastPaycheck(d);
+  let billContributionsTotal = 0;
+  (d.bills || []).forEach(bill => {
+    if (!bill.active) return;
+    const contrib = billPaycheckContribution(bill, days);
+    // Cap at bill.amount so we never over-reserve
+    bill.reserveBalance = Math.min(bill.amount, roundCent((bill.reserveBalance || 0) + contrib));
+    billContributionsTotal = roundCent(billContributionsTotal + contrib);
+  });
+
+  // Step 2: split the remaining amount by category percentages
+  const remaining = Math.max(0, roundCent(grossAmount - billContributionsTotal));
   const percents = resolvePercents(d.categories);
   const splits = {};
 
   ALL_KEYS.forEach(k => {
-    const alloc = roundCent(grossAmount * (percents[k] / 100));
+    const alloc = roundCent(remaining * (percents[k] / 100));
     splits[k] = alloc;
-    d.categories[k].balance = roundCent((d.categories[k].balance||0) + alloc);
+    // Spending categories added immediately (stay in checking physically)
+    if (d.categories[k].type === 'spending') {
+      d.categories[k].balance = roundCent((d.categories[k].balance || 0) + alloc);
+    }
+    // Savings categories are NOT added yet — only added when the transfer checkbox is checked
   });
 
-  // Check goals
   const celebrations = [];
-  ALL_KEYS.forEach(k => {
-    const cat = d.categories[k];
-    if (cat.goal !== null && !cat.goalMet && cat.balance >= cat.goal) {
-      cat.goalMet = true;
-      celebrations.push({ label: cat.label, goal: cat.goal, redirectLabel: cat.redirectTo ? d.categories[cat.redirectTo]?.label : null });
-    }
-  });
 
   const pid = uid();
-  d.paychecks.unshift({ id: pid, date: todayISO(), grossAmount, splits, percents });
+  d.paychecks.unshift({ id: pid, date: todayISO(), grossAmount, splits, percents, billContributionsTotal });
 
-  // Create transfer checklist for savings categories
+  // Transfer checklist (v2: toggling actually moves money between checking and savings)
   const transferItems = SAVINGS_KEYS.map(k => ({
     key: k,
     amount: splits[k],
     checked: false,
   }));
-  d.transfers.unshift({ paycheckId: pid, items: transferItems });
+  d.transfers.unshift({ paycheckId: pid, items: transferItems, v2: true });
 
-  // Add paycheck to checking
-  d.checkingBalance = roundCent((d.checkingBalance||0) + grossAmount);
+  // Full gross deposited to checking; savings will reduce it as transfers are checked
+  d.checkingBalance = roundCent((d.checkingBalance || 0) + grossAmount);
 
   return { d, celebrations };
 }
@@ -736,6 +809,26 @@ function freqLabel(bill) {
   return { 1: 'Monthly', 2: 'Every 2 months', 3: 'Quarterly', 6: 'Every 6 months', 12: 'Annually' }[bill.intervalMonths || 1] || `Every ${bill.intervalMonths} months`;
 }
 
+// Returns days since last paycheck (default 7 for first paycheck)
+function daysSinceLastPaycheck(d) {
+  if (!d.paychecks || !d.paychecks.length) return 7;
+  const last = new Date(d.paychecks[0].date + 'T12:00:00');
+  const diff = Math.round((new Date() - last) / 86400000);
+  return Math.max(1, diff);
+}
+
+// Weekly contribution needed per bill (bill amount / billing period in weeks)
+function billWeeklyContribution(bill) {
+  if (bill.intervalWeeks) return bill.amount / bill.intervalWeeks;
+  const months = bill.intervalMonths || 1;
+  return bill.amount / (months * (365.25 / 12 / 7));
+}
+
+// Per-paycheck contribution for a bill given days since last paycheck
+function billPaycheckContribution(bill, days) {
+  return roundCent(billWeeklyContribution(bill) * (days / 7));
+}
+
 // Process bills that are due — called on init to auto-apply missed/due bills
 function processDueBills(d) {
   if (!d.bills || !d.bills.length) return { d, applied: [] };
@@ -752,8 +845,22 @@ function processDueBills(d) {
     if (!cat) return;
 
     function applyOn(dateStr) {
-      cat.balance = roundCent(cat.balance - bill.amount);
-      if (cat.type === 'spending') d.checkingBalance = roundCent((d.checkingBalance||0) - bill.amount);
+      const reserve = bill.reserveBalance || 0;
+      const shortfall = Math.max(0, bill.amount - reserve);
+
+      if (cat.type === 'spending') {
+        // For spending-category bills: always deduct from checking for the actual payment.
+        // The reserve reduces how much also hits the category balance.
+        d.checkingBalance = roundCent((d.checkingBalance || 0) - bill.amount);
+        if (shortfall > 0) cat.balance = roundCent(cat.balance - shortfall);
+      } else {
+        // Savings-category bills: old behavior (category balance only, no checking)
+        cat.balance = roundCent(cat.balance - bill.amount);
+      }
+
+      // Reset reserve after payment
+      bill.reserveBalance = Math.max(0, roundCent(reserve - bill.amount));
+
       d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
       applied.push({ label: bill.label });
     }
@@ -819,6 +926,7 @@ function renderAll() {
   renderGoals();
   renderSettings();
   renderBills();
+  if (activeTab === 4) renderAnalytics();
 }
 
 function renderHeader() {
@@ -949,12 +1057,16 @@ function renderPaychecks() {
         <td>${fmt(lastP.splits[k]||0)}</td>
       </tr>`;
     }).join('');
+    const billContribLine = lastP.billContributionsTotal > 0
+      ? `<tr><td style="color:var(--warning)">💸 Bill Reserves</td><td></td><td style="color:var(--warning)">-${fmt(lastP.billContributionsTotal)}</td></tr>`
+      : '';
     bContent.innerHTML = `
       <div style="margin-bottom:12px">
         <div style="font-size:20px;font-weight:800">${fmt(lastP.grossAmount)}</div>
         <div class="text-sm text-muted">${fmtDate(lastP.date)}</div>
+        ${lastP.billContributionsTotal > 0 ? `<div class="text-xs text-muted" style="margin-top:4px">Split from ${fmt(roundCent(lastP.grossAmount - lastP.billContributionsTotal))} after bill reserves</div>` : ''}
       </div>
-      <table class="split-table">${rows}</table>`;
+      <table class="split-table">${billContribLine}${rows}</table>`;
   } else {
     bCard.style.display = 'none';
   }
@@ -1025,35 +1137,56 @@ function renderBills() {
   const now = new Date();
   now.setHours(0,0,0,0);
 
-  // Dashboard bills list
+  // Dashboard bills list — sinking fund design
   const dashEl = document.getElementById('dash-bills');
   if (dashEl) {
-    if (!bills.length) {
+    const active = bills.filter(b => b.active);
+    if (!active.length) {
       dashEl.innerHTML = '<div class="empty-state" style="padding:16px 0">No bills set up yet</div>';
     } else {
-      const active = bills.filter(b => b.active);
       dashEl.innerHTML = active.map(b => {
         const cat = data.categories[b.category];
+        const reserve = b.reserveBalance || 0;
+        const pct = Math.min(100, Math.round((reserve / b.amount) * 100));
         const next = billNextDueDate(b);
         next.setHours(0,0,0,0);
-        const diff = Math.round((next - now) / 86400000);
+        const daysUntil = Math.round((next - now) / 86400000);
+        const nextLabel = next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+        // Status badge
         let statusHtml;
-        if (diff > 0) statusHtml = `<span class="bill-status paid">✓ Paid</span>`;
-        else if (diff === 0) statusHtml = `<span class="bill-status due-today">Due today</span>`;
-        else statusHtml = `<span class="bill-status due-today">Overdue</span>`;
-        const nextLabel = diff > 0 ? `Next: ${next.toLocaleDateString('en-US',{month:'short',day:'numeric'})}` : '';
-        const dayPart = b.intervalWeeks ? '' : ` · ${ordinal(b.dayOfMonth)}`;
-        return `<div class="bill-item">
-          <div class="bill-meta">
-            <div class="bill-name">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
-            <div class="bill-detail">${freqLabel(b)}${dayPart}${nextLabel?' · '+nextLabel:''}</div>
-          </div>
-          <div class="bill-right">
-            <div class="bill-amount">-${fmt(b.amount)}</div>
+        if (pct >= 100) {
+          statusHtml = `<span class="bill-status-ready">Ready!</span>`;
+        } else if (daysUntil <= 7 && daysUntil >= 0) {
+          statusHtml = `<span class="bill-status-due">Due Soon</span>`;
+        } else if (daysUntil < 0) {
+          statusHtml = `<span class="bill-status-behind">Overdue</span>`;
+        } else if (pct >= 40) {
+          statusHtml = `<span class="bill-status-ontrack">On Track</span>`;
+        } else {
+          statusHtml = `<span class="bill-status-behind">Behind</span>`;
+        }
+
+        // Per-paycheck contribution label (based on weekly rate)
+        const weeklyRate = billWeeklyContribution(b);
+        const perPaycheck = roundCent(weeklyRate * 7); // approximate weekly amount
+
+        return `<div class="bill-fund-item">
+          <div class="bill-fund-header">
+            <div class="bill-fund-name">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
             ${statusHtml}
           </div>
+          <div class="bill-fund-amounts">
+            <strong>${fmt(reserve)}</strong> saved of <strong>${fmt(b.amount)}</strong> needed
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill${pct>=100?' done':''}" style="width:${pct}%;${pct<100?'background:var(--warning)':''}"></div>
+          </div>
+          <div class="bill-fund-meta">
+            Due ${daysUntil < 0 ? 'was' : ''} ${nextLabel}${daysUntil >= 0 ? ` · ${daysUntil}d away` : ''} · <span>~${fmt(perPaycheck)}/week set aside</span>
+          </div>
         </div>`;
-      }).join('') || '<div class="empty-state" style="padding:16px 0">No active bills</div>';
+      }).join('');
     }
   }
 
@@ -1125,6 +1258,7 @@ function switchTab(n) {
   document.querySelectorAll('.tab-content').forEach((el,i) => el.className='tab-content'+(i===n?' active':''));
   document.querySelectorAll('.nav-btn').forEach(btn => btn.className='nav-btn'+(Number(btn.dataset.tab)===n?' active':''));
   document.getElementById('main').scrollTop = 0;
+  if (n === 4) renderAnalytics();
 }
 
 // ══════════════════════════════════════════════════
@@ -1150,10 +1284,10 @@ function openPaycheckModal() {
       </div>
     </div>
     <button class="btn btn-primary" onclick="submitPaycheck('full')" style="margin-bottom:8px">Add Paycheck 💵
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds money to all balances + checking</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Bill reserves set aside first, then splits the rest. Full amount goes to checking — check off savings transfers manually.</div>
     </button>
     <button class="btn btn-secondary" onclick="submitPaycheck('nobalances')" style="margin-bottom:8px">Already Deposited 🏦
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds to spending buckets only — skips savings + checking</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds to spending buckets only — skips savings, checking &amp; bill reserves</div>
     </button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
@@ -1165,19 +1299,19 @@ function submitPaycheck(mode) {
   if (!gross || gross <= 0) { alert('Enter a valid amount'); return; }
 
   if (mode === 'nobalances') {
-    // Process normally then undo savings + checking additions — spending buckets keep their split
-    const result = processNewPaycheck(data, gross);
-    data = result.d;
-    // Undo checking addition
-    data.checkingBalance = roundCent((data.checkingBalance||0) - gross);
-    // Undo savings category additions only
-    const latestPaycheck = data.paychecks[0];
-    SAVINGS_KEYS.forEach(k => {
-      data.categories[k].balance = roundCent(data.categories[k].balance - (latestPaycheck.splits[k]||0));
-      if (data.categories[k].goal !== null) {
-        data.categories[k].goalMet = data.categories[k].balance >= data.categories[k].goal;
+    // "Already Deposited" — money is already in bank. Only credit spending categories.
+    // No bill reserve contributions, no checking change, no savings change.
+    const percents = resolvePercents(data.categories);
+    const splits = {};
+    ALL_KEYS.forEach(k => {
+      const alloc = roundCent(gross * (percents[k] / 100));
+      splits[k] = alloc;
+      if (data.categories[k].type === 'spending') {
+        data.categories[k].balance = roundCent((data.categories[k].balance || 0) + alloc);
       }
     });
+    const pid = uid();
+    data.paychecks.unshift({ id: pid, date: todayISO(), grossAmount: gross, splits, percents, mode: 'nobalances' });
     saveData(data);
     hideModal();
     renderAll();
@@ -1185,7 +1319,7 @@ function submitPaycheck(mode) {
     return;
   }
 
-  // 'full' — normal full paycheck
+  // 'full' — normal full paycheck with bill contributions + transfer checklist
   const result = processNewPaycheck(data, gross);
   data = result.d;
   saveData(data);
@@ -1199,7 +1333,34 @@ function submitPaycheck(mode) {
 function toggleTransfer(idx) {
   const latest = data.transfers[0];
   if (!latest) return;
-  latest.items[idx].checked = !latest.items[idx].checked;
+  const item = latest.items[idx];
+  const wasChecked = item.checked;
+  item.checked = !wasChecked;
+
+  if (latest.v2) {
+    // v2 transfers actually move money between checking and savings
+    const amount = item.amount;
+    const key = item.key;
+    if (!wasChecked) {
+      // Checking → savings category
+      data.checkingBalance = roundCent((data.checkingBalance || 0) - amount);
+      data.categories[key].balance = roundCent((data.categories[key].balance || 0) + amount);
+      // Check if savings goal was reached
+      const cat = data.categories[key];
+      if (cat.goal !== null && !cat.goalMet && cat.balance >= cat.goal) {
+        cat.goalMet = true;
+        showCelebrations([{ label: cat.label, goal: cat.goal, redirectLabel: cat.redirectTo ? data.categories[cat.redirectTo]?.label : null }], 0);
+      }
+    } else {
+      // Reverse: savings category → back to checking
+      data.checkingBalance = roundCent((data.checkingBalance || 0) + amount);
+      data.categories[key].balance = roundCent((data.categories[key].balance || 0) - amount);
+      const cat = data.categories[key];
+      if (cat.goal !== null && cat.goalMet && cat.balance < cat.goal) cat.goalMet = false;
+    }
+  }
+  // v1 (old) transfers just mark done — balances were already applied at paycheck time
+
   saveData(data);
   renderPaychecks();
   renderHeader();
@@ -1696,8 +1857,8 @@ function openAddBill() {
     </div>
     <div class="form-group" id="bill-day-group">
       <label class="form-label">Day of Month (due date)</label>
-      <input class="form-input" type="number" min="1" max="28" placeholder="e.g. 19" id="bill-day">
-      <div class="text-xs text-muted mt-8">Enter 1–28. Bills apply automatically when this day arrives.</div>
+      <input class="form-input" type="number" min="1" max="31" placeholder="e.g. 19" id="bill-day">
+      <div class="text-xs text-muted mt-8">Enter 1–31. In shorter months, the bill fires on the last day instead.</div>
     </div>
     <div class="form-group">
       <label class="form-label">Category (which bucket to subtract from)</label>
@@ -1734,7 +1895,7 @@ function openEditBill(id) {
     </div>
     <div class="form-group" id="bill-day-group"${bill.intervalWeeks?' style="display:none"':''}>
       <label class="form-label">Day of Month (due date)</label>
-      <input class="form-input" type="number" min="1" max="28" id="bill-day" value="${bill.dayOfMonth||''}">
+      <input class="form-input" type="number" min="1" max="31" id="bill-day" value="${bill.dayOfMonth||''}">
     </div>
     <div class="form-group">
       <label class="form-label">Category</label>
@@ -1787,6 +1948,159 @@ function deleteBill(id) {
   saveData(data);
   hideModal();
   renderAll();
+}
+
+// ══════════════════════════════════════════════════
+//  ANALYTICS
+// ══════════════════════════════════════════════════
+let analyticsFilter = '6m'; // '6m' or 'all'
+
+function setAnalyticsFilter(type, range, btn) {
+  analyticsFilter = range;
+  document.querySelectorAll('#analytics-filter .tl-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAnalytics();
+}
+
+function renderAnalytics() {
+  const expenses = data.expenses || [];
+  const paychecks = data.paychecks || [];
+
+  // ── Summary stats ──
+  const totalEarned = roundCent(paychecks.reduce((s, p) => s + p.grossAmount, 0));
+  const totalSpent  = roundCent(expenses.reduce((s, e) => s + e.amount, 0));
+  const savingsNow  = totalSavings(data);
+  const avgPaycheck = paychecks.length ? roundCent(totalEarned / paychecks.length) : 0;
+
+  const statsEl = document.getElementById('analytics-stats');
+  if (statsEl) {
+    statsEl.innerHTML = [
+      { label: 'Total Earned',  value: fmt(totalEarned),  color: 'var(--success)' },
+      { label: 'Total Spent',   value: fmt(totalSpent),   color: 'var(--danger)'  },
+      { label: 'Total Saved',   value: fmt(savingsNow),   color: 'var(--accent)'  },
+      { label: 'Avg Paycheck',  value: fmt(avgPaycheck),  color: 'var(--warning)' },
+    ].map(s => `<div class="stat-card">
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value" style="color:${s.color}">${s.value}</div>
+    </div>`).join('');
+  }
+
+  // ── Spending by category ──
+  const catEl = document.getElementById('analytics-by-category');
+  if (catEl) {
+    if (!expenses.length) {
+      catEl.innerHTML = '<div class="empty-state">No expenses logged yet</div>';
+    } else {
+      const totals = {};
+      expenses.forEach(e => { totals[e.category] = roundCent((totals[e.category] || 0) + e.amount); });
+      const cats = Object.entries(totals)
+        .map(([k, v]) => ({ key: k, label: data.categories[k]?.label || k, icon: data.categories[k]?.icon || '📦', value: v }))
+        .sort((a, b) => b.value - a.value);
+      const max = cats[0]?.value || 1;
+      catEl.innerHTML = cats.map(c => `
+        <div class="cat-bar-row">
+          <div class="cat-bar-label">
+            <span>${c.icon} ${c.label}</span>
+            <span style="color:var(--danger)">${fmt(c.value)}</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:${Math.round((c.value/max)*100)}%;background:var(--danger);opacity:0.8"></div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  // ── Monthly spending chart ──
+  renderMonthlyChart(expenses);
+
+  // ── Paycheck history chart ──
+  renderPaycheckChart(paychecks);
+
+  // ── Recent transactions ──
+  const recentEl = document.getElementById('analytics-recent');
+  if (recentEl) {
+    const recent = expenses.slice(0, 20);
+    if (!recent.length) {
+      recentEl.innerHTML = '<div class="empty-state">No transactions yet</div>';
+    } else {
+      recentEl.innerHTML = `<ul class="expense-list">${recent.map((e, i) => {
+        const cat = data.categories[e.category];
+        return `<li class="expense-item">
+          <div class="exp-meta">
+            <div class="exp-cat">${cat?.icon||'📦'} ${cat?.label||e.category}</div>
+            <div class="exp-date-note">${fmtDate(e.date)}${e.note?' · '+e.note:''}</div>
+          </div>
+          <div class="exp-amount">-${fmt(e.amount)}</div>
+        </li>`;
+      }).join('')}</ul>`;
+    }
+  }
+}
+
+function renderMonthlyChart(expenses) {
+  const el = document.getElementById('analytics-monthly');
+  if (!el) return;
+  if (!expenses.length) { el.innerHTML = '<div class="empty-state">No expenses yet</div>'; return; }
+
+  // Filter range
+  let filtered = expenses;
+  if (analyticsFilter === '6m') {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 6);
+    const cutoffStr = cutoff.toISOString().slice(0, 7);
+    filtered = expenses.filter(e => e.date.slice(0, 7) >= cutoffStr);
+  }
+
+  const monthly = {};
+  filtered.forEach(e => {
+    const m = e.date.slice(0, 7);
+    monthly[m] = roundCent((monthly[m] || 0) + e.amount);
+  });
+
+  const months = Object.entries(monthly).sort(([a],[b]) => a.localeCompare(b));
+  if (!months.length) { el.innerHTML = '<div class="empty-state">No data in range</div>'; return; }
+
+  const W = Math.max(280, months.length * 44), H = 130, padB = 24, padT = 10;
+  const max = Math.max(...months.map(([,v]) => v)) || 1;
+  const bw = Math.floor((W / months.length) * 0.65);
+  const gap = Math.floor(W / months.length);
+
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const bars = months.map(([ym, v], i) => {
+    const bh = Math.max(3, Math.round(((H - padB - padT) * v) / max));
+    const x = Math.round(i * gap + (gap - bw) / 2);
+    const y = H - padB - bh;
+    const [, mo] = ym.split('-').map(Number);
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--danger)" opacity="0.75"/>
+            <text x="${x + bw/2}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${MONTH_NAMES[mo-1]}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:${W}px;height:auto">${bars}</svg>`;
+}
+
+function renderPaycheckChart(paychecks) {
+  const el = document.getElementById('analytics-paychecks');
+  if (!el) return;
+  if (!paychecks.length) { el.innerHTML = '<div class="empty-state">No paychecks yet</div>'; return; }
+
+  const items = paychecks.slice().reverse().slice(-12);
+  const W = Math.max(280, items.length * 44), H = 130, padB = 24, padT = 10;
+  const max = Math.max(...items.map(p => p.grossAmount)) || 1;
+  const bw = Math.floor((W / items.length) * 0.65);
+  const gap = Math.floor(W / items.length);
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const bars = items.map((p, i) => {
+    const bh = Math.max(3, Math.round(((H - padB - padT) * p.grossAmount) / max));
+    const x = Math.round(i * gap + (gap - bw) / 2);
+    const y = H - padB - bh;
+    const [, mo, day] = p.date.split('-').map(Number);
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="var(--success)" opacity="0.75"/>
+            <text x="${x + bw/2}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${MONTH_NAMES[mo-1]} ${day}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:${W}px;height:auto">${bars}</svg>`;
 }
 
 // ══════════════════════════════════════════════════
