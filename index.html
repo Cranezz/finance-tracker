@@ -546,7 +546,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.4</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.5</div>
         <div class="text-xs text-muted">Last updated Jun 2026</div>
       </div>
     </div>
@@ -845,9 +845,11 @@ function billWeeklyContribution(bill) {
   today.setHours(12, 0, 0, 0);
   next.setHours(12, 0, 0, 0);
   const daysUntil = Math.max(0, Math.round((next - today) / 86400000));
-  // Use whole paycheck periods — floor so a bill 8 days away counts as 1 paycheck, not 1.14
-  const weeksLeft = Math.max(1, Math.floor(daysUntil / 7));
-  return needed / weeksLeft;
+  // Count paychecks INCLUDING today's: floor((days-1)/7)+1
+  // e.g. 12 days away → floor(11/7)+1 = 2 paychecks (today + one more next week)
+  //       5 days away → floor(4/7)+1  = 1 paycheck  (just this one)
+  const paychecksLeft = Math.max(1, Math.floor((daysUntil - 1) / 7) + 1);
+  return needed / paychecksLeft;
 }
 
 // Per-paycheck contribution for a bill given days since last paycheck
