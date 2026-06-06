@@ -546,7 +546,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.5</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.6</div>
         <div class="text-xs text-muted">Last updated Jun 2026</div>
       </div>
     </div>
@@ -832,30 +832,36 @@ function daysSinceLastPaycheck(d) {
   return Math.max(1, diff);
 }
 
-// Per-paycheck amount needed — counts whole paycheck periods (weeks) until the due date
-// so the result is always a clean, sensible number.
-// Example: $5 bill due in 8 days → 1 full week left → $5.00/paycheck (not $4.38).
-//          $33.64 bill due in 29 days → 4 full weeks → $8.41/paycheck.
+// Count how many Fridays (paydays) fall on or before the due date, starting from today.
+// If today is Friday it counts. Always returns at least 1.
+function fridaysUntilDate(dueDate) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate);
+  due.setHours(0, 0, 0, 0);
+  // Advance to this week's Friday (or stay if today is Friday)
+  const d = new Date(today);
+  const dow = d.getDay(); // 0=Sun … 5=Fri … 6=Sat
+  if (dow !== 5) d.setDate(d.getDate() + ((5 - dow + 7) % 7));
+  let count = 0;
+  while (d <= due) { count++; d.setDate(d.getDate() + 7); }
+  return Math.max(1, count);
+}
+
+// Per-paycheck amount: remaining balance ÷ number of Friday paychecks before the bill.
 function billWeeklyContribution(bill) {
   const reserve = bill.reserveBalance || 0;
   const needed = Math.max(0, bill.amount - reserve);
   if (needed <= 0) return 0;
   const next = billNextDueDate(bill);
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  next.setHours(12, 0, 0, 0);
-  const daysUntil = Math.max(0, Math.round((next - today) / 86400000));
-  // Count paychecks INCLUDING today's: floor((days-1)/7)+1
-  // e.g. 12 days away → floor(11/7)+1 = 2 paychecks (today + one more next week)
-  //       5 days away → floor(4/7)+1  = 1 paycheck  (just this one)
-  const paychecksLeft = Math.max(1, Math.floor((daysUntil - 1) / 7) + 1);
-  return needed / paychecksLeft;
+  const paychecks = fridaysUntilDate(next);
+  return needed / paychecks;
 }
 
-// Per-paycheck contribution for a bill given days since last paycheck
+// Contribution deducted at each paycheck — capped so we never over-reserve.
 function billPaycheckContribution(bill, days) {
-  const contrib = roundCent(billWeeklyContribution(bill) * (days / 7));
-  // Never contribute more than what's still needed
+  // One paycheck's share regardless of exact days (user is strictly weekly/Friday)
+  const contrib = roundCent(billWeeklyContribution(bill));
   const needed = Math.max(0, bill.amount - (bill.reserveBalance || 0));
   return Math.min(contrib, needed);
 }
@@ -1199,8 +1205,9 @@ function renderBills() {
         const daysUntil = Math.round((next - now) / 86400000);
         const nextLabel = next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-        // Per-week amount needed from now until the due date
-        const weeklyRate = roundCent(billWeeklyContribution(b));
+        // How many Friday paychecks before this bill?
+        const paychecksLeft = fridaysUntilDate(next);
+        const perPaycheck = roundCent(billWeeklyContribution(b));
 
         return `<div class="bill-fund-item">
           <div class="bill-fund-header">
@@ -1214,7 +1221,7 @@ function renderBills() {
             <div class="progress-fill${pct>=100?' done':''}" style="width:${pct}%;${pct<100?'background:var(--warning)':''}"></div>
           </div>
           <div class="bill-fund-meta">
-            <span>~${fmt(weeklyRate)}/week set aside to be ready in time</span>
+            <span>${paychecksLeft} paycheck${paychecksLeft !== 1 ? 's' : ''} before this bill · <strong style="color:var(--text)">~${fmt(perPaycheck)}/paycheck</strong></span>
           </div>
         </div>`;
       }).join('');
