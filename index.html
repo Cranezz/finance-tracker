@@ -546,7 +546,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.6</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.7</div>
         <div class="text-xs text-muted">Last updated Jun 2026</div>
       </div>
     </div>
@@ -691,6 +691,7 @@ function todayISO() { return new Date().toISOString().split('T')[0]; }
 function uid() { return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)+Date.now(); }
 function roundCent(n) { return Math.round(n * 100) / 100; }
 function totalSavings(d) { return roundCent(SAVINGS_KEYS.reduce((s,k) => s + (d.categories[k]?.balance||0), 0)); }
+function totalBillReserves(d) { return roundCent((d.bills||[]).reduce((s,b) => s + (b.reserveBalance||0), 0)); }
 
 function resolvePercents(cats) {
   const p = {};
@@ -883,21 +884,13 @@ function processDueBills(d) {
 
     function applyOn(dateStr) {
       const reserve = bill.reserveBalance || 0;
-      const shortfall = Math.max(0, bill.amount - reserve);
-
-      if (cat.type === 'spending') {
-        // For spending-category bills: always deduct from checking for the actual payment.
-        // The reserve reduces how much also hits the category balance.
-        d.checkingBalance = roundCent((d.checkingBalance || 0) - bill.amount);
-        if (shortfall > 0) cat.balance = roundCent(cat.balance - shortfall);
-      } else {
-        // Savings-category bills: old behavior (category balance only, no checking)
-        cat.balance = roundCent(cat.balance - bill.amount);
-      }
-
-      // Reset reserve after payment
+      // Bills are always paid from checking — the sinking fund reserve was built
+      // from checking over time, so we just deduct the bill amount from checking now.
+      // Any reserve shortfall (under-saved) still comes from checking.
+      d.checkingBalance = roundCent((d.checkingBalance || 0) - bill.amount);
+      // Reset the reserve — it has been "spent" on the bill
       bill.reserveBalance = Math.max(0, roundCent(reserve - bill.amount));
-
+      // Log the expense for history (category is for reference/display only, not deducted)
       d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
       applied.push({ label: bill.label });
     }
@@ -982,7 +975,9 @@ function renderHeader() {
   const el = document.getElementById('header-balance');
   el.textContent = fmt(savings);
   el.className = savings < 0 ? 'negative' : '';
-  document.getElementById('header-checking-amt').textContent = fmt(data.checkingBalance||0);
+  // Header shows spendable checking (total minus bill reserves)
+  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data));
+  document.getElementById('header-checking-amt').textContent = fmt(spendable);
 }
 
 // ── Dashboard ───────────────────────────────────────────
@@ -995,11 +990,18 @@ function renderDashboard() {
     : 'Enter your first paycheck to get started';
 
   // Checking
-  document.getElementById('dash-checking').textContent = fmt(data.checkingBalance||0);
+  const checkingTotal = data.checkingBalance || 0;
+  const billReserve = totalBillReserves(data);
+  const available = roundCent(checkingTotal - billReserve);
   const transferred = getTransferredAmount();
-  document.getElementById('dash-checking-meta').textContent = transferred > 0
-    ? `${fmt(transferred)} moved to savings this week`
-    : 'Available spending money this week';
+  document.getElementById('dash-checking').textContent = fmt(checkingTotal);
+
+  // Build the meta line: reserve + available + savings-transferred info
+  const metaParts = [];
+  if (billReserve > 0) metaParts.push(`💸 ${fmt(billReserve)} reserved for bills`);
+  metaParts.push(`${fmt(available)} available to spend`);
+  if (transferred > 0) metaParts.push(`${fmt(transferred)} moved to savings`);
+  document.getElementById('dash-checking-meta').textContent = metaParts.join(' · ');
 
   // Savings grid (locked)
   document.getElementById('dash-savings').innerHTML = SAVINGS_KEYS.map(k => {
@@ -1899,7 +1901,7 @@ function openAddBill() {
       <div class="text-xs text-muted mt-8">Enter 1–31. In shorter months, the bill fires on the last day instead.</div>
     </div>
     <div class="form-group">
-      <label class="form-label">Category (which bucket to subtract from)</label>
+      <label class="form-label">Category <span class="text-muted text-xs">(icon/display only — bills are paid from checking)</span></label>
       <div class="form-select-wrap">
         <select class="form-select" id="bill-category">${spendingCatOptions('misc')}</select>
       </div>
@@ -1936,7 +1938,7 @@ function openEditBill(id) {
       <input class="form-input" type="number" min="1" max="31" id="bill-day" value="${bill.dayOfMonth||''}">
     </div>
     <div class="form-group">
-      <label class="form-label">Category</label>
+      <label class="form-label">Category <span class="text-muted text-xs">(icon/display only — bills are paid from checking)</span></label>
       <div class="form-select-wrap">
         <select class="form-select" id="bill-category">${spendingCatOptions(bill.category)}</select>
       </div>
