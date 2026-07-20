@@ -546,8 +546,8 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.6.7</div>
-        <div class="text-xs text-muted">Last updated Jun 2026</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.7.1</div>
+        <div class="text-xs text-muted">Last updated Jul 2026</div>
       </div>
     </div>
     <!-- Tab 4: Analytics -->
@@ -1133,7 +1133,10 @@ function renderPaychecks() {
       <div style="font-size:13px;font-weight:700">${fmtDate(p.date)}</div>
       ${i===0?'<div style="font-size:11px;color:var(--accent)">CURRENT</div>':''}
     </div>
-    <div style="font-size:16px;font-weight:700">${fmt(p.grossAmount)}</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-size:16px;font-weight:700">${fmt(p.grossAmount)}</div>
+      <button class="exp-edit-btn" onclick="openDeletePaycheck('${p.id}')" style="color:var(--danger);border-color:var(--danger)33;background:var(--danger)11">Delete</button>
+    </div>
   </li>`).join('');
 }
 
@@ -1407,6 +1410,99 @@ function toggleTransfer(idx) {
   renderDashboard();
 }
 
+// ── Delete paycheck ─────────────────────────────────────
+function openDeletePaycheck(paycheckId) {
+  const p = data.paychecks.find(p => p.id === paycheckId);
+  if (!p) return;
+  const transfer = data.transfers.find(t => t.paycheckId === paycheckId);
+  const checkedTransfers = transfer ? transfer.items.filter(t => t.checked) : [];
+  const checkedTotal = roundCent(checkedTransfers.reduce((s,t) => s + t.amount, 0));
+  const isNoBalances = p.mode === 'nobalances';
+
+  document.getElementById('modal-title').textContent = 'Delete Paycheck?';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="background:var(--danger)11;border:1px solid var(--danger)33;border-radius:var(--radius-sm);padding:14px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:4px">${fmtDate(p.date)} — ${fmt(p.grossAmount)}</div>
+      <div style="font-size:13px;color:var(--text-muted)">This will undo all changes made by this paycheck:</div>
+    </div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px">What will be reversed:</div>
+    <ul style="font-size:13px;color:var(--text-muted);padding-left:18px;margin-bottom:16px;line-height:2">
+      ${!isNoBalances ? `<li>Checking −${fmt(p.grossAmount)} (paycheck deposit undone)</li>` : ''}
+      ${SPENDING_KEYS.map(k => p.splits[k] > 0 ? `<li>${data.categories[k].icon} ${data.categories[k].label} −${fmt(p.splits[k]||0)}</li>` : '').join('')}
+      ${checkedTotal > 0 ? checkedTransfers.map(t => `<li>${data.categories[t.key]?.icon||''} ${data.categories[t.key]?.label||t.key} savings −${fmt(t.amount)} (transfer was checked)</li>`).join('') : '<li>No savings transfers to reverse (none were checked)</li>'}
+      ${p.billContributionsTotal > 0 ? `<li>💸 Bill reserves −${fmt(p.billContributionsTotal)} (redistributed to bills)</li>` : ''}
+    </ul>
+    <div style="font-size:12px;color:var(--warning);margin-bottom:16px">⚠️ Bill reserves can't be perfectly un-split per bill — the total will be subtracted proportionally.</div>
+    <button class="btn btn-danger" onclick="deletePaycheck('${paycheckId}')">Yes, Delete This Paycheck</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function deletePaycheck(paycheckId) {
+  const idx = data.paychecks.findIndex(p => p.id === paycheckId);
+  if (idx === -1) return;
+  const p = data.paychecks[idx];
+  const isNoBalances = p.mode === 'nobalances';
+
+  // Find and remove the associated transfer record
+  const transferIdx = data.transfers.findIndex(t => t.paycheckId === paycheckId);
+  const transfer = transferIdx !== -1 ? data.transfers[transferIdx] : null;
+
+  // 1. Reverse spending category balances (always, both modes)
+  SPENDING_KEYS.forEach(k => {
+    if (p.splits[k]) {
+      data.categories[k].balance = roundCent((data.categories[k].balance||0) - (p.splits[k]||0));
+    }
+  });
+
+  if (!isNoBalances) {
+    // 2. Reverse savings categories that were actually transferred (v2: checked items moved money)
+    if (transfer && transfer.v2) {
+      transfer.items.forEach(t => {
+        if (t.checked) {
+          data.categories[t.key].balance = roundCent((data.categories[t.key].balance||0) - t.amount);
+          // goalMet re-check
+          const cat = data.categories[t.key];
+          if (cat.goal !== null && cat.goalMet && cat.balance < cat.goal) cat.goalMet = false;
+        }
+      });
+    } else if (transfer && !transfer.v2) {
+      // Old v1 transfers: splits were credited immediately at paycheck time
+      SAVINGS_KEYS.forEach(k => {
+        if (p.splits[k]) {
+          data.categories[k].balance = roundCent((data.categories[k].balance||0) - (p.splits[k]||0));
+          const cat = data.categories[k];
+          if (cat.goal !== null && cat.goalMet && cat.balance < cat.goal) cat.goalMet = false;
+        }
+      });
+    }
+
+    // 3. Reverse checking deposit (full gross was added)
+    data.checkingBalance = roundCent((data.checkingBalance||0) - p.grossAmount);
+
+    // 4. Reverse bill reserves proportionally
+    const billContribTotal = p.billContributionsTotal || 0;
+    if (billContribTotal > 0) {
+      const activeBills = (data.bills||[]).filter(b => b.active);
+      const totalCurrentReserve = activeBills.reduce((s,b) => s + (b.reserveBalance||0), 0);
+      if (totalCurrentReserve > 0) {
+        activeBills.forEach(b => {
+          const share = roundCent(billContribTotal * ((b.reserveBalance||0) / totalCurrentReserve));
+          b.reserveBalance = Math.max(0, roundCent((b.reserveBalance||0) - share));
+        });
+      }
+    }
+  }
+
+  // 5. Remove the paycheck and its transfer record
+  data.paychecks.splice(idx, 1);
+  if (transferIdx !== -1) data.transfers.splice(transferIdx, 1);
+
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
 // ── Manual expense ──────────────────────────────────────
 function openManualExpense(prefillName, prefillCat, prefillAmount) {
   const suggestedCat = prefillCat || guessCategory(prefillName||'');
@@ -1524,6 +1620,24 @@ function deleteExpense(idx) {
 function openAdjustChecking(dir) {
   const label = dir > 0 ? 'Deposit to Checking' : 'Withdraw from Checking';
   document.getElementById('modal-title').textContent = label;
+
+  const catSection = dir > 0 ? `
+    <div class="form-group">
+      <label class="form-label">Also Add to Category? <span style="font-size:11px;color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+      <div class="text-xs text-muted" style="margin-bottom:8px">Pick a category to credit the same amount — useful for depositing extra cash directly into a spending bucket or savings goal.</div>
+      <div class="form-select-wrap">
+        <select class="form-select" id="chk-category">
+          <option value="">None — checking only</option>
+          <optgroup label="Spending Buckets">
+            ${SPENDING_KEYS.map(k => `<option value="${k}">${data.categories[k].icon} ${data.categories[k].label}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Savings Goals">
+            ${SAVINGS_KEYS.map(k => `<option value="${k}">${data.categories[k].icon} ${data.categories[k].label}</option>`).join('')}
+          </optgroup>
+        </select>
+      </div>
+    </div>` : '';
+
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
       <label class="form-label">Amount</label>
@@ -1532,6 +1646,7 @@ function openAdjustChecking(dir) {
         <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="chk-amount">
       </div>
     </div>
+    ${catSection}
     <div class="form-group">
       <label class="form-label">Note (optional)</label>
       <input class="form-input" type="text" placeholder="e.g. ATM deposit..." id="chk-note" maxlength="60">
@@ -1545,6 +1660,25 @@ function submitCheckingAdj(dir) {
   const amt = parseFloat(document.getElementById('chk-amount')?.value);
   if (!amt || amt <= 0) { alert('Enter a valid amount'); return; }
   data.checkingBalance = roundCent((data.checkingBalance||0) + dir * amt);
+
+  // If a category was selected for a deposit, credit it too
+  if (dir > 0) {
+    const catKey = document.getElementById('chk-category')?.value;
+    if (catKey && data.categories[catKey]) {
+      data.categories[catKey].balance = roundCent((data.categories[catKey].balance||0) + amt);
+      // Check if savings goal was just reached
+      const cat = data.categories[catKey];
+      if (cat.goal !== null && !cat.goalMet && cat.balance >= cat.goal) {
+        cat.goalMet = true;
+        saveData(data);
+        hideModal();
+        renderAll();
+        showCelebrations([{ label: cat.label, goal: cat.goal, redirectLabel: cat.redirectTo ? data.categories[cat.redirectTo]?.label : null }], 0);
+        return;
+      }
+    }
+  }
+
   saveData(data);
   hideModal();
   renderAll();
