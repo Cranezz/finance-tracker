@@ -270,6 +270,43 @@
     .bill-status-behind { background: var(--danger)22; color: var(--danger); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
     .bill-status-due { background: var(--warning)22; color: var(--warning); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
 
+    /* Bill recurrence inputs (Y/M/W/D) */
+    .recur-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .recur-field { text-align: center; }
+    .recur-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 18px; font-weight: 700; padding: 10px 4px; text-align: center; }
+    .recur-field input:focus { border-color: var(--accent); }
+    .recur-field label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-top: 6px; }
+    .recur-summary { text-align: center; font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 10px; }
+    .eom-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .eom-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
+    .eom-row .eom-label { font-size: 13px; }
+    .eom-row .eom-label strong { display: block; font-size: 14px; margin-bottom: 2px; }
+
+    /* Bill calendar */
+    .bill-cal-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; margin-top: 4px; }
+    .bill-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .bill-cal-header .bc-title { font-size: 14px; font-weight: 700; }
+    .bill-cal-nav { display: flex; gap: 4px; }
+    .bill-cal-nav button { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 8px; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+    .bill-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+    .bill-cal-dow { text-align: center; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; padding-bottom: 6px; }
+    .bill-cal-day { position: relative; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 13px; border-radius: 8px; color: var(--text); }
+    .bill-cal-day.other-month { color: var(--text-dim); }
+    .bill-cal-day.is-today { background: var(--surface); font-weight: 800; box-shadow: inset 0 0 0 2px var(--accent); }
+    .bill-cal-day.is-last { box-shadow: inset 0 0 0 2px #4a9eff; background: #4a9eff22; font-weight: 700; color: #fff; }
+    .bill-cal-day.is-next { box-shadow: inset 0 0 0 2px #4a9eff; background: transparent; }
+    .bill-cal-day.is-next::after { content: ''; position: absolute; inset: 0; border-radius: 8px; border: 2px dashed #4a9eff88; }
+    .bill-cal-day.is-today.is-next::after { border-color: var(--accent); }
+    .bill-cal-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 11px; color: var(--text-muted); }
+    .bill-cal-legend .lg-item { display: flex; align-items: center; gap: 5px; }
+    .bill-cal-legend .lg-dot { width: 11px; height: 11px; border-radius: 4px; flex-shrink: 0; }
+    .bill-cal-legend .lg-dot.last { background: #4a9eff; }
+    .bill-cal-legend .lg-dot.next { border: 2px dashed #4a9eff88; background: transparent; }
+    .bill-cal-legend .lg-dot.today { box-shadow: inset 0 0 0 2px var(--accent); }
+    .next-due-picker-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+    .next-due-picker-row input[type=date] { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 14px; padding: 9px 10px; flex: 1; }
+    .next-due-picker-row input[type=date]:focus { border-color: var(--accent); }
+
     /* Analytics */
     .analytics-section-title { font-size: 15px; font-weight: 700; margin-bottom: 10px; margin-top: 4px; }
     .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -546,7 +583,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.7.1</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.7.3</div>
         <div class="text-xs text-muted">Last updated Jul 2026</div>
       </div>
     </div>
@@ -643,28 +680,32 @@ function freshData() {
     expenses: [],
     checkingBalance: 0,
     transfers: [], // { paycheckId, items: [{key, amount, checked}] }
-    bills: [],     // { id, label, amount, dayOfMonth, category, active, lastApplied: 'YYYY-MM'|null }
+    bills: [],     // { id, label, amount, category, active, recurYears, recurMonths, recurWeeks, recurDays, endOfMonth, nextDueOverride, lastAppliedDate }
   };
 }
 
 function migrateData(d) {
   if (!d.bills) d.bills = [];
   const _today = new Date();
-  const _todayDay = _today.getDate();
-  const _currentYM = _today.toISOString().slice(0, 7);
 
   d.bills.forEach(b => {
     if (!b.intervalMonths && !b.intervalWeeks) b.intervalMonths = 1;
     if (b.reserveBalance === undefined) b.reserveBalance = 0;
+    migrateBillRecurrence(b);
 
-    // Auto-fix: if a monthly bill's lastApplied is the current month but the due
-    // date hasn't arrived yet, the bill was incorrectly marked as paid. Reset it
-    // to last month so the correct next-due date is recalculated.
-    if (b.intervalMonths && b.lastApplied === _currentYM && b.dayOfMonth && _todayDay < b.dayOfMonth) {
-      let prevM = _today.getMonth(); // JS 0-indexed; coincidentally = previous month in 1-indexed
-      let prevY = _today.getFullYear();
-      if (prevM === 0) { prevM = 12; prevY--; }
-      b.lastApplied = `${prevY}-${String(prevM).padStart(2,'0')}`;
+    // Convert legacy lastApplied ("YYYY-MM" for monthly bills, or "YYYY-MM-DD" for
+    // weekly bills) into a single concrete lastAppliedDate the new engine understands.
+    if (b.lastAppliedDate === undefined) {
+      if (!b.lastApplied) {
+        b.lastAppliedDate = null;
+      } else if (b.lastApplied.length === 7) {
+        // Old monthly-anchor format "YYYY-MM" — rebuild the exact date it represents.
+        const [y, m] = b.lastApplied.split('-').map(Number);
+        const day = Math.min(b.dayOfMonth || 1, new Date(y, m, 0).getDate());
+        b.lastAppliedDate = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      } else {
+        b.lastAppliedDate = b.lastApplied;
+      }
     }
   });
 
@@ -799,30 +840,112 @@ function weeklyAllocRate(d, catKey) {
   return totalAlloc / (daysDiff / 7);
 }
 
-// Returns the next Date this bill is due
-function billNextDueDate(bill) {
-  const today = new Date();
+// ══════════════════════════════════════════════════
+//  UNIFIED RECURRENCE ENGINE
+//  A bill's cadence is stored as {recurYears, recurMonths, recurWeeks, recurDays}.
+//  Legacy bills (intervalWeeks / intervalMonths+dayOfMonth) are migrated into this
+//  shape once. dayOfMonth / intervalWeeks / intervalMonths are kept in sync so the
+//  existing sinking-fund math (billWeeklyContribution, etc.) keeps working untouched.
+//  processDueBills below is the ONLY place that actually applies/charges a bill,
+//  and it now walks forward using addRecurrence so every field (Y/M/W/D + end-of-
+//  month + manual override) is honored consistently with what the calendar shows.
+// ══════════════════════════════════════════════════
+function billHasRecur(bill) {
+  return !!(bill.recurYears || bill.recurMonths || bill.recurWeeks || bill.recurDays);
+}
+
+// Adds the bill's Y/M/W/D recurrence to a given Date, honoring calendar month math
+// (adding "1 month" lands on the same day next month, not +30 days) and the
+// end-of-month flag (snaps to the last day of the resulting month).
+function addRecurrence(baseDate, bill) {
+  const d = new Date(baseDate);
+  const years = bill.recurYears||0, months = bill.recurMonths||0, weeks = bill.recurWeeks||0, days = bill.recurDays||0;
+  const targetDay = d.getDate();
+  d.setDate(1); // avoid month-length spillover while adding months
+  d.setMonth(d.getMonth() + years*12 + months);
+  const lastDayOfTargetMonth = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  d.setDate(Math.min(targetDay, lastDayOfTargetMonth));
+  d.setDate(d.getDate() + weeks*7 + days);
+  if (bill.endOfMonth) {
+    const lastDay = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    d.setDate(lastDay);
+  }
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+// Migrates a legacy bill (intervalWeeks / intervalMonths) into the new recur* fields
+// exactly once. Safe to call repeatedly — no-op once recur fields exist.
+function migrateBillRecurrence(bill) {
+  if (bill.recurYears === undefined) bill.recurYears = 0;
+  if (bill.recurMonths === undefined) bill.recurMonths = 0;
+  if (bill.recurWeeks === undefined) bill.recurWeeks = 0;
+  if (bill.recurDays === undefined) bill.recurDays = 0;
+  if (bill.endOfMonth === undefined) bill.endOfMonth = false;
+  if (bill.nextDueOverride === undefined) bill.nextDueOverride = null;
+  if (billHasRecur(bill)) return; // already migrated (or user has since edited cadence)
+
   if (bill.intervalWeeks) {
-    if (!bill.lastApplied) return today;
-    const d = new Date(bill.lastApplied + 'T00:00:00');
-    d.setDate(d.getDate() + bill.intervalWeeks * 7);
-    return d;
+    bill.recurWeeks = bill.intervalWeeks;
+  } else {
+    bill.recurMonths = bill.intervalMonths || 1;
   }
-  const interval = bill.intervalMonths || 1;
-  if (!bill.lastApplied) {
-    return new Date(today.getFullYear(), today.getMonth(), bill.dayOfMonth);
+}
+
+// Keeps legacy intervalWeeks/intervalMonths/dayOfMonth in sync with the new recur*
+// fields so the existing sinking-fund contribution math (which only understands the
+// old fields) keeps producing correct per-paycheck numbers without being rewritten.
+function syncLegacyIntervalFields(bill, dueDate) {
+  const totalMonths = (bill.recurYears||0)*12 + (bill.recurMonths||0);
+  const totalWeeks = bill.recurWeeks||0;
+  const totalDays = bill.recurDays||0;
+  if (totalWeeks || totalDays) {
+    // Any non-month component makes this a "weekly-style" cadence for reserve math —
+    // approximate the whole cadence in weeks so contribution math still spreads correctly.
+    const approxWeeks = Math.max(1, Math.round((totalMonths*30 + totalWeeks*7 + totalDays) / 7));
+    bill.intervalWeeks = approxWeeks;
+    bill.intervalMonths = null;
+  } else {
+    bill.intervalWeeks = null;
+    bill.intervalMonths = Math.max(1, totalMonths || 1);
+    if (dueDate) bill.dayOfMonth = dueDate.getDate();
   }
-  const [y, m] = bill.lastApplied.split('-').map(Number);
-  let nextM = m + interval, nextY = y;
-  while (nextM > 12) { nextM -= 12; nextY++; }
-  return new Date(nextY, nextM - 1, bill.dayOfMonth);
+}
+
+// Returns the next Date this bill is due.
+function billNextDueDate(bill) {
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // A manually-picked next due date takes priority until it's actually applied.
+  if (bill.nextDueOverride) {
+    return new Date(bill.nextDueOverride + 'T00:00:00');
+  }
+
+  if (!bill.lastAppliedDate) {
+    // No history yet — nothing has been charged, so "next due" is just today
+    // (the bill will start its real cadence once first applied or overridden).
+    return today;
+  }
+  return addRecurrence(new Date(bill.lastAppliedDate + 'T00:00:00'), bill);
+}
+
+// Returns the last Date this bill was actually processed/charged, or null if never.
+function billLastAppliedDate(bill) {
+  return bill.lastAppliedDate ? new Date(bill.lastAppliedDate + 'T00:00:00') : null;
+}
+
+function recurLabel(bill) {
+  const parts = [];
+  if (bill.recurYears) parts.push(`${bill.recurYears} year${bill.recurYears!==1?'s':''}`);
+  if (bill.recurMonths) parts.push(`${bill.recurMonths} month${bill.recurMonths!==1?'s':''}`);
+  if (bill.recurWeeks) parts.push(`${bill.recurWeeks} week${bill.recurWeeks!==1?'s':''}`);
+  if (bill.recurDays) parts.push(`${bill.recurDays} day${bill.recurDays!==1?'s':''}`);
+  if (!parts.length) return 'One-time';
+  return 'Every ' + parts.join(', ');
 }
 
 function freqLabel(bill) {
-  if (bill.intervalWeeks) {
-    return { 1: 'Every week', 2: 'Every 2 weeks', 4: 'Every 4 weeks' }[bill.intervalWeeks] || `Every ${bill.intervalWeeks} weeks`;
-  }
-  return { 1: 'Monthly', 2: 'Every 2 months', 3: 'Quarterly', 6: 'Every 6 months', 12: 'Annually' }[bill.intervalMonths || 1] || `Every ${bill.intervalMonths} months`;
+  return recurLabel(bill);
 }
 
 // Returns days since last paycheck (default 7 for first paycheck)
@@ -867,84 +990,55 @@ function billPaycheckContribution(bill, days) {
   return Math.min(contrib, needed);
 }
 
-// Process bills that are due — called on init to auto-apply missed/due bills
+// Process bills that are due — called on init to auto-apply missed/due bills.
+// Walks the bill forward one recurrence at a time using addRecurrence() until its
+// next due date is in the future, charging checking + logging an expense each time.
 function processDueBills(d) {
   if (!d.bills || !d.bills.length) return { d, applied: [] };
-  const today = new Date();
-  const todayDay = today.getDate();
-  const currentYM = today.toISOString().slice(0, 7);
-  const applied = [];
-
   const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+  const applied = [];
 
   d.bills.forEach(bill => {
     if (!bill.active) return;
     const cat = d.categories[bill.category];
     if (!cat) return;
 
-    function applyOn(dateStr) {
+    function applyOn(date) {
+      const dateStr = date.toISOString().split('T')[0];
       const reserve = bill.reserveBalance || 0;
       // Bills are always paid from checking — the sinking fund reserve was built
       // from checking over time, so we just deduct the bill amount from checking now.
-      // Any reserve shortfall (under-saved) still comes from checking.
       d.checkingBalance = roundCent((d.checkingBalance || 0) - bill.amount);
-      // Reset the reserve — it has been "spent" on the bill
       bill.reserveBalance = Math.max(0, roundCent(reserve - bill.amount));
-      // Log the expense for history (category is for reference/display only, not deducted)
       d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
       applied.push({ label: bill.label });
+      bill.lastAppliedDate = dateStr;
+      bill.lastApplied = dateStr; // legacy display compatibility
+      if (bill.nextDueOverride === dateStr) bill.nextDueOverride = null;
     }
 
-    if (bill.intervalWeeks) {
-      // Weekly-based: apply every N weeks by date
-      if (!bill.lastApplied) {
-        // New bill — start the cycle from today without charging anything
-        bill.lastApplied = todayDate.toISOString().split('T')[0];
-      } else {
-        let next = new Date(bill.lastApplied + 'T00:00:00');
-        next.setDate(next.getDate() + bill.intervalWeeks * 7);
-        while (next <= todayDate) {
-          const ds = next.toISOString().split('T')[0];
-          applyOn(ds);
-          bill.lastApplied = ds;
-          next.setDate(next.getDate() + bill.intervalWeeks * 7);
+    if (!bill.lastAppliedDate) {
+      // First-ever run for this bill: never auto-charge on setup. Just anchor its
+      // history to "yesterday relative to cadence" so the next due date is correct,
+      // UNLESS a manual next-due override is due today/past — then charge it (that's
+      // an explicit user action, so it's expected to fire).
+      if (bill.nextDueOverride) {
+        const overrideDate = new Date(bill.nextDueOverride + 'T00:00:00');
+        if (overrideDate <= todayDate) {
+          applyOn(overrideDate);
         }
       }
-    } else {
-      // Month-based: apply on dayOfMonth every N months
-      const interval = bill.intervalMonths || 1;
-      const toApply = [];
-      if (!bill.lastApplied) {
-        // New bill — initialize lastApplied so the next due date is correct,
-        // but never charge anything automatically for current/past periods.
-        if (todayDay < bill.dayOfMonth) {
-          // Due date is still ahead this month — anchor to last month so next due = this month
-          let prevM = today.getMonth(); // JS 0-indexed: June=5 → "5" = May in 1-indexed ✓
-          let prevY = today.getFullYear();
-          if (prevM === 0) { prevM = 12; prevY--; }
-          bill.lastApplied = `${prevY}-${String(prevM).padStart(2,'0')}`;
-        } else {
-          // Due date already passed this month — anchor to current month so next due = next month
-          bill.lastApplied = currentYM;
-        }
-        // Don't push to toApply — no charge on first setup
-      } else {
-        let [y, m] = bill.lastApplied.split('-').map(Number);
-        while (true) {
-          m += interval;
-          while (m > 12) { m -= 12; y++; }
-          const ym = `${y}-${String(m).padStart(2,'0')}`;
-          if (ym > currentYM) break;
-          if (ym === currentYM) { if (todayDay >= bill.dayOfMonth) toApply.push(ym); break; }
-          else toApply.push(ym);
-        }
-      }
-      toApply.forEach(ym => {
-        const [yr, mo] = ym.split('-').map(Number);
-        const day = Math.min(bill.dayOfMonth, new Date(yr, mo, 0).getDate());
-        applyOn(`${ym}-${String(day).padStart(2,'0')}`);
-        bill.lastApplied = ym;
-      });
+      // Otherwise: no history, no due override in the past — nothing to do yet.
+      return;
+    }
+
+    // Walk forward from last applied date, charging each due date that has passed.
+    let next = addRecurrence(new Date(bill.lastAppliedDate + 'T00:00:00'), bill);
+    let guard = 0;
+    while (next <= todayDate && guard < 500) {
+      applyOn(next);
+      next = addRecurrence(new Date(bill.lastAppliedDate + 'T00:00:00'), bill);
+      guard++;
     }
   });
 
@@ -1244,7 +1338,7 @@ function renderBills() {
         return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
           <div class="sr-label" style="flex:1;min-width:0">
             <div style="font-weight:700">${cat?.icon||'💸'} ${escHtml(b.label)}</div>
-            <div style="font-size:12px;color:var(--text-muted)">${fmt(b.amount)} · ${freqLabel(b)}${b.intervalWeeks?'':' · '+ordinal(b.dayOfMonth)} · ${cat?.label||b.category}${b.active?'':' · <span style="color:var(--danger)">inactive</span>'}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${fmt(b.amount)} · ${freqLabel(b)} · ${cat?.label||b.category}${b.active?'':' · <span style="color:var(--danger)">inactive</span>'}</div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="openEditBill('${b.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
         </div>`;
@@ -1989,28 +2083,159 @@ function spendingCatOptions(selectedKey) {
   return ALL_KEYS.map(k => `<option value="${k}"${k===selectedKey?' selected':''}>${data.categories[k].icon} ${data.categories[k].label}</option>`).join('');
 }
 
-// freq value format: "w1","w2","w4" for weeks; "m1","m2","m3","m6","m12" for months
-function billFreqValue(bill) {
-  if (bill && bill.intervalWeeks) return 'w' + bill.intervalWeeks;
-  return 'm' + (bill?.intervalMonths || 1);
+function dateToISO(d) { return d.toISOString().split('T')[0]; }
+
+// Reads the Y/M/W/D + end-of-month + next-due fields currently in the modal DOM.
+function readRecurFormState() {
+  const y = parseInt(document.getElementById('bill-recur-y')?.value) || 0;
+  const mo = parseInt(document.getElementById('bill-recur-m')?.value) || 0;
+  const w = parseInt(document.getElementById('bill-recur-w')?.value) || 0;
+  const da = parseInt(document.getElementById('bill-recur-d')?.value) || 0;
+  const eom = !!document.getElementById('bill-eom')?.checked;
+  const nextDue = document.getElementById('bill-next-due')?.value || null;
+  return { recurYears: y, recurMonths: mo, recurWeeks: w, recurDays: da, endOfMonth: eom, nextDueOverride: nextDue };
 }
-function parseFreqValue(val) {
-  if (val.startsWith('w')) return { intervalWeeks: parseInt(val.slice(1)), intervalMonths: null };
-  return { intervalWeeks: null, intervalMonths: parseInt(val.slice(1)) };
+
+// Builds a temporary bill-like object from the current form state so the preview
+// calendar and summary line can be computed before the bill is actually saved.
+function draftBillFromForm(existingBill) {
+  const state = readRecurFormState();
+  return Object.assign({}, existingBill || {}, state);
 }
-function billFreqOptions(selected) {
-  return [
-    ['w1','Every week'],['w2','Every 2 weeks'],['w4','Every 4 weeks'],
-    ['m1','Monthly'],['m2','Every 2 months'],['m3','Quarterly (every 3 months)'],['m6','Every 6 months'],['m12','Annually'],
-  ].map(([v,l]) => `<option value="${v}"${v===selected?' selected':''}>${l}</option>`).join('');
+
+function updateRecurSummary() {
+  const draft = draftBillFromForm(window._editingBill);
+  const summaryEl = document.getElementById('recur-summary');
+  if (summaryEl) summaryEl.textContent = billHasRecur(draft) || draft.nextDueOverride ? recurLabel(draft) : 'Pick at least one interval below';
+  renderBillCalendarPreview(draft);
 }
-function toggleBillDayField() {
-  const val = document.getElementById('bill-interval')?.value || 'm1';
-  const g = document.getElementById('bill-day-group');
-  if (g) g.style.display = val.startsWith('w') ? 'none' : '';
+
+function onEomToggle() {
+  const eom = document.getElementById('bill-eom')?.checked;
+  const nd = document.getElementById('bill-next-due');
+  if (eom && nd && nd.value) {
+    // Snap the picked date to the last day of its month for consistency
+    const d = new Date(nd.value + 'T00:00:00');
+    const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    nd.value = dateToISO(last);
+  }
+  updateRecurSummary();
+}
+
+// ── Calendar preview (used inside the edit/add bill modal) ─────────────
+let billCalMonthOffset = 0; // months forward/back from today, for nav arrows
+
+function billCalNav(dir) {
+  billCalMonthOffset += dir;
+  updateRecurSummary();
+}
+
+function renderBillCalendarPreview(draftBill) {
+  const el = document.getElementById('bill-calendar-grid');
+  if (!el) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const viewDate = new Date(today.getFullYear(), today.getMonth() + billCalMonthOffset, 1);
+  const y = viewDate.getFullYear(), m = viewDate.getMonth();
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('bill-cal-month-label').textContent = `${monthNames[m]} ${y}`;
+
+  const lastAppliedDate = draftBill.lastAppliedDate ? new Date(draftBill.lastAppliedDate + 'T00:00:00') : null;
+  let nextDue = null;
+  try {
+    if (draftBill.nextDueOverride) {
+      nextDue = new Date(draftBill.nextDueOverride + 'T00:00:00');
+    } else if (billHasRecur(draftBill)) {
+      nextDue = lastAppliedDate ? addRecurrence(lastAppliedDate, draftBill) : null;
+    }
+  } catch(e) { nextDue = null; }
+
+  const firstOfMonth = new Date(y, m, 1);
+  const startDow = firstOfMonth.getDay();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const daysInPrevMonth = new Date(y, m, 0).getDate();
+
+  const sameDay = (a,b) => a && b && a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+
+  let cells = '';
+  // Leading days from previous month
+  for (let i = 0; i < startDow; i++) {
+    const dayNum = daysInPrevMonth - startDow + i + 1;
+    cells += `<div class="bill-cal-day other-month">${dayNum}</div>`;
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const cellDate = new Date(y, m, day);
+    const classes = ['bill-cal-day'];
+    if (sameDay(cellDate, today)) classes.push('is-today');
+    if (lastAppliedDate && sameDay(cellDate, lastAppliedDate)) classes.push('is-last');
+    if (nextDue && sameDay(cellDate, nextDue)) classes.push('is-next');
+    cells += `<div class="${classes.join(' ')}">${day}</div>`;
+  }
+  // Trailing days to fill grid to a multiple of 7
+  const totalCells = startDow + daysInMonth;
+  const trailing = (7 - (totalCells % 7)) % 7;
+  for (let i = 1; i <= trailing; i++) {
+    cells += `<div class="bill-cal-day other-month">${i}</div>`;
+  }
+
+  el.innerHTML = cells;
+}
+
+function billCalendarHTML() {
+  return `
+    <div class="bill-cal-card">
+      <div class="bill-cal-header">
+        <div class="bc-title" id="bill-cal-month-label"></div>
+        <div class="bill-cal-nav">
+          <button type="button" onclick="billCalNav(-1)">‹</button>
+          <button type="button" onclick="billCalNav(1)">›</button>
+        </div>
+      </div>
+      <div class="bill-cal-grid">
+        <div class="bill-cal-dow">S</div><div class="bill-cal-dow">M</div><div class="bill-cal-dow">T</div><div class="bill-cal-dow">W</div><div class="bill-cal-dow">T</div><div class="bill-cal-dow">F</div><div class="bill-cal-dow">S</div>
+      </div>
+      <div class="bill-cal-grid" id="bill-calendar-grid" style="margin-top:3px"></div>
+      <div class="bill-cal-legend">
+        <div class="lg-item"><div class="lg-dot today"></div>Today</div>
+        <div class="lg-item"><div class="lg-dot last"></div>Last processed</div>
+        <div class="lg-item"><div class="lg-dot next"></div>Next due</div>
+      </div>
+    </div>`;
+}
+
+function recurFieldsHTML(bill) {
+  const y = bill?.recurYears || 0, mo = bill?.recurMonths || 0, w = bill?.recurWeeks || 0, da = bill?.recurDays || 0;
+  return `
+    <div class="form-group">
+      <label class="form-label">How Often Is This Bill Paid?</label>
+      <div class="recur-grid">
+        <div class="recur-field"><input type="number" min="0" max="20" id="bill-recur-y" value="${y}" oninput="updateRecurSummary()"><label>Years</label></div>
+        <div class="recur-field"><input type="number" min="0" max="60" id="bill-recur-m" value="${mo}" oninput="updateRecurSummary()"><label>Months</label></div>
+        <div class="recur-field"><input type="number" min="0" max="104" id="bill-recur-w" value="${w}" oninput="updateRecurSummary()"><label>Weeks</label></div>
+        <div class="recur-field"><input type="number" min="0" max="365" id="bill-recur-d" value="${da}" oninput="updateRecurSummary()"><label>Days</label></div>
+      </div>
+      <div class="recur-summary" id="recur-summary"></div>
+    </div>
+    <div class="eom-row">
+      <input type="checkbox" id="bill-eom" ${bill?.endOfMonth?'checked':''} onchange="onEomToggle()">
+      <div class="eom-label"><strong>Always last day of the month</strong>For rent or bills due on the 30th/31st — automatically adjusts for shorter months.</div>
+    </div>
+    <div class="form-group mt-16">
+      <label class="form-label">Next Due Date <span style="font-size:11px;color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — pick exactly when this bill is next due)</span></label>
+      <div class="next-due-picker-row">
+        <input type="date" id="bill-next-due" value="${bill?.nextDueOverride || ''}" onchange="onEomToggle()">
+        ${bill?.nextDueOverride ? `<button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('bill-next-due').value='';updateRecurSummary()">Clear</button>` : ''}
+      </div>
+      <div class="text-xs text-muted mt-8">After this date, the bill goes back to its normal recurring schedule above.</div>
+    </div>
+    <div class="form-group">
+      ${billCalendarHTML()}
+    </div>`;
 }
 
 function openAddBill() {
+  window._editingBill = null;
+  billCalMonthOffset = 0;
   document.getElementById('modal-title').textContent = 'Add Bill';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
@@ -2023,17 +2248,7 @@ function openAddBill() {
         <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="bill-amount">
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Frequency</label>
-      <div class="form-select-wrap">
-        <select class="form-select" id="bill-interval" onchange="toggleBillDayField()">${billFreqOptions('m1')}</select>
-      </div>
-    </div>
-    <div class="form-group" id="bill-day-group">
-      <label class="form-label">Day of Month (due date)</label>
-      <input class="form-input" type="number" min="1" max="31" placeholder="e.g. 19" id="bill-day">
-      <div class="text-xs text-muted mt-8">Enter 1–31. In shorter months, the bill fires on the last day instead.</div>
-    </div>
+    ${recurFieldsHTML(null)}
     <div class="form-group">
       <label class="form-label">Category <span class="text-muted text-xs">(icon/display only — bills are paid from checking)</span></label>
       <div class="form-select-wrap">
@@ -2043,12 +2258,15 @@ function openAddBill() {
     <button class="btn btn-primary" onclick="submitBill(null)">Save Bill</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
+  updateRecurSummary();
   setTimeout(() => { const i = document.getElementById('bill-label'); if(i) i.focus(); }, 100);
 }
 
 function openEditBill(id) {
   const bill = (data.bills||[]).find(b => b.id === id);
   if (!bill) return;
+  window._editingBill = bill;
+  billCalMonthOffset = 0;
   document.getElementById('modal-title').textContent = 'Edit Bill';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
@@ -2061,16 +2279,7 @@ function openEditBill(id) {
         <input class="form-input dollar" type="number" min="0.01" step="0.01" id="bill-amount" value="${bill.amount.toFixed(2)}">
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Frequency</label>
-      <div class="form-select-wrap">
-        <select class="form-select" id="bill-interval" onchange="toggleBillDayField()">${billFreqOptions(billFreqValue(bill))}</select>
-      </div>
-    </div>
-    <div class="form-group" id="bill-day-group"${bill.intervalWeeks?' style="display:none"':''}>
-      <label class="form-label">Day of Month (due date)</label>
-      <input class="form-input" type="number" min="1" max="31" id="bill-day" value="${bill.dayOfMonth||''}">
-    </div>
+    ${recurFieldsHTML(bill)}
     <div class="form-group">
       <label class="form-label">Category <span class="text-muted text-xs">(icon/display only — bills are paid from checking)</span></label>
       <div class="form-select-wrap">
@@ -2086,30 +2295,49 @@ function openEditBill(id) {
     <div class="mt-8"><button class="btn btn-danger" onclick="deleteBill('${id}')">Delete Bill</button></div>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
+  updateRecurSummary();
 }
 
 function submitBill(id) {
   const label = document.getElementById('bill-label')?.value.trim();
   const amount = parseFloat(document.getElementById('bill-amount')?.value);
-  const freqVal = document.getElementById('bill-interval')?.value || 'm1';
-  const { intervalWeeks, intervalMonths } = parseFreqValue(freqVal);
-  const isWeekly = !!intervalWeeks;
-  const day = isWeekly ? 1 : parseInt(document.getElementById('bill-day')?.value);
   const category = document.getElementById('bill-category')?.value;
   const active = id ? (document.getElementById('bill-active')?.checked !== false) : true;
+  const { recurYears, recurMonths, recurWeeks, recurDays, endOfMonth, nextDueOverride } = readRecurFormState();
 
   if (!label) { alert('Enter a bill name'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
-  if (!isWeekly && (!day || day < 1 || day > 28)) { alert('Enter a day between 1 and 28'); return; }
+  if (!recurYears && !recurMonths && !recurWeeks && !recurDays) { alert('Enter at least one recurrence value (years, months, weeks, or days)'); return; }
   if (!category) { alert('Select a category'); return; }
 
   if (!data.bills) data.bills = [];
 
   if (id) {
     const bill = data.bills.find(b => b.id === id);
-    if (bill) { bill.label = label; bill.amount = roundCent(amount); bill.intervalWeeks = intervalWeeks; bill.intervalMonths = intervalMonths; bill.dayOfMonth = day; bill.category = category; bill.active = active; }
+    if (bill) {
+      bill.label = label;
+      bill.amount = roundCent(amount);
+      bill.recurYears = recurYears; bill.recurMonths = recurMonths; bill.recurWeeks = recurWeeks; bill.recurDays = recurDays;
+      bill.endOfMonth = endOfMonth;
+      bill.nextDueOverride = nextDueOverride || null;
+      bill.category = category;
+      bill.active = active;
+      // Anchor point for the next due-date calc: derive a matching dayOfMonth for
+      // display/legacy purposes from whichever date is currently "next due".
+      const next = billNextDueDate(bill);
+      syncLegacyIntervalFields(bill, next);
+    }
   } else {
-    data.bills.push({ id: uid(), label, amount: roundCent(amount), intervalWeeks, intervalMonths, dayOfMonth: day, category, active: true, lastApplied: null });
+    const newBill = {
+      id: uid(), label, amount: roundCent(amount),
+      recurYears, recurMonths, recurWeeks, recurDays, endOfMonth,
+      nextDueOverride: nextDueOverride || null,
+      category, active: true,
+      lastAppliedDate: null, lastApplied: null, reserveBalance: 0,
+    };
+    const next = billNextDueDate(newBill);
+    syncLegacyIntervalFields(newBill, next);
+    data.bills.push(newBill);
   }
 
   saveData(data);
@@ -2128,15 +2356,12 @@ function deleteBill(id) {
 function resetBillDueDate(id) {
   const bill = (data.bills||[]).find(b => b.id === id);
   if (!bill) return;
-  // Clear lastApplied — processDueBills will recalculate the correct anchor on next load
+  // Clear history/override so the next due date is recalculated fresh from today
+  bill.lastAppliedDate = null;
   bill.lastApplied = null;
+  bill.nextDueOverride = null;
   bill.reserveBalance = 0;
   saveData(data);
-  // Re-run processDueBills so the anchor is set immediately (without charging)
-  const { d } = processDueBills(data);
-  data = d;
-  saveData(data);
-  hideModal();
   renderAll();
   alert('Due date reset! The next due date has been recalculated from today.');
 }
