@@ -244,7 +244,7 @@ c13b8d9 v2026.6.1 — Add bill sinking funds, fix transfer bug, add Analytics   
 
 ---
 
-## 10. Session v2026.8.0 → v2026.8.1 — Paycheck Funds (gas)
+## 10. Session v2026.8.0 → v2026.8.2 — Flat-Amount Buckets (gas)
 
 **User request:** "I need a spot in my app for gas… instead of a percentage of my paycheck you take out a certain amount. Let me edit this amount somewhere, kind of like the bills but in a separate area… change the amount and how often, like every paycheck, every other paycheck… this doesn't calculate by calendar but by paycheck. Take out $25 each paycheck." Plus two questions: can the app pull transactions straight from his bank, and can he get an area for his investing account.
 
@@ -267,6 +267,13 @@ A second set-aside system, deliberately separate from Bills. Bills answer *"a kn
 **UI:** "Paycheck Funds" section on the dashboard between Spending Buckets and Bills (reuses the `.bill-fund-*` classes), a management card in Settings, an add/edit modal (name, icon, amount, how-often select, balance correction, "take it out of my next paycheck", active, delete), a "Log a purchase" shortcut on each fund, and a per-fund line in the paycheck breakdown + delete-paycheck reversal list.
 
 **Also wired in:** `catOptions` now appends active funds (and keeps an unknown selected key so editing an old purchase can't silently re-categorize it — this is why `spendingCatOptions` is now just a delegate); gas keywords in `guessCategory` (fund names are matched first); `fundScanCategoryLines()` injects fund categories into both receipt-scanner prompts, so a fill-up scans straight into the Gas fund.
+
+### v2026.8.2 — gas moved into the Spending Buckets grid
+User: *"The gas should be a spending category, please change it to be like that."* Funds are no longer their own dashboard section; they render as extra `.cat-card`s inside **Spending Buckets** (`dash-spending`), tap-to-edit via `.flat-bucket`, with a `$25.00 every paycheck` subline. They also appear in the Goals tab's Spending Budgets list. Only Settings still has a management card ("⛽ Flat-Amount Buckets"), which is where you add one.
+
+**The one semantic change:** fund balances are no longer subtracted from spendable checking. `totalFundReserves()` is gone, replaced by `totalFundBalances()` which feeds the Spending Buckets **total**. Gas is now exactly like Food — money that lives in checking with an envelope drawn around it, not an earmark against the header number. The set-aside mechanics are untouched: still a flat amount off the top per paycheck, still reversed exactly on paycheck delete. If the user ever says the header overstates what they can spend, restoring the earmark is a two-line change in `renderHeader` + `renderDashboard`.
+
+User-facing vocabulary is now "flat-amount bucket", not "fund" — "fund" is reserved for bills/sinking funds. Internals (`data.funds`, `renderFunds`, `openEditFund`) kept the old names to avoid a pointless data migration.
 
 ### Gotchas for the next agent
 1. **Never store a fund balance on the fund object.** Two sources of truth for money is how you get drift. `fundBal(d,f)` / `addToFund(d,f,amt)` are the only accessors.

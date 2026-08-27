@@ -266,10 +266,9 @@
     .bill-fund-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
     .bill-fund-meta span { color: var(--accent); font-weight: 600; }
 
-    /* Paycheck funds (gas, etc.) */
-    .fund-balance { font-size: 19px; font-weight: 800; }
-    .fund-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-    .fund-actions .btn { flex: 1; min-width: 120px; }
+    /* Flat-amount spending buckets (gas, etc.) — tap to edit */
+    .cat-card .cat-sub { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+    .cat-card.flat-bucket { cursor: pointer; border-color: var(--accent)33; }
     .bill-status-ready { background: var(--success)22; color: var(--success); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
     .bill-status-ontrack { background: var(--accent)22; color: var(--accent); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
     .bill-status-behind { background: var(--danger)22; color: var(--danger); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
@@ -443,15 +442,6 @@
       </div>
       <div class="cat-grid" id="dash-spending"></div>
 
-      <!-- Paycheck funds (flat dollar set-asides: gas, etc.) -->
-      <div class="section-header mt-12">
-        <div class="section-title">Paycheck Funds</div>
-        <button class="btn btn-secondary btn-sm" onclick="openAddFund()" style="padding:6px 12px;font-size:13px">+ Add</button>
-      </div>
-      <div class="card" style="padding:0 16px">
-        <div id="dash-funds"><div class="empty-state" style="padding:16px 0">No funds yet</div></div>
-      </div>
-
       <!-- Bills -->
       <div class="section-header mt-12">
         <div class="section-title">Bills & Sinking Funds</div>
@@ -567,13 +557,13 @@
         </div>
       </div>
 
-      <!-- Paycheck funds management -->
+      <!-- Flat-amount spending buckets management -->
       <div class="card">
-        <div class="card-title">⛽ Paycheck Funds</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">A flat dollar amount comes out of your paycheck — not a percentage. The schedule is counted in <strong>paychecks</strong>, not calendar months: every paycheck, every other paycheck, and so on.</div>
+        <div class="card-title">⛽ Flat-Amount Buckets</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">These sit with your Spending Buckets, but instead of a percentage of your paycheck they take a flat dollar amount. The schedule is counted in <strong>paychecks</strong>, not calendar months: every paycheck, every other paycheck, and so on.</div>
         <div id="settings-funds"></div>
         <div class="mt-12">
-          <button class="btn btn-secondary" onclick="openAddFund()">+ Add Fund</button>
+          <button class="btn btn-secondary" onclick="openAddFund()">+ Add Bucket</button>
         </div>
       </div>
 
@@ -607,7 +597,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.8.1</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.8.2</div>
         <div class="text-xs text-muted">Last updated Aug 2026</div>
       </div>
     </div>
@@ -1157,10 +1147,9 @@ function addToFund(d, f, amt) {
   d.categories[f.key].balance = roundCent((d.categories[f.key].balance || 0) + amt);
 }
 
-// Fund money physically sits in checking, so it's earmarked the same way bill
-// reserves are. A negative (overspent) fund never inflates spendable money.
-function totalFundReserves(d) {
-  return roundCent(activeFunds(d).reduce((s, f) => s + Math.max(0, fundBal(d, f)), 0));
+// Sum of every flat-amount bucket, for the Spending Buckets total.
+function totalFundBalances(d) {
+  return roundCent(activeFunds(d).reduce((s, f) => s + fundBal(d, f), 0));
 }
 
 function fundFreqLabel(f) {
@@ -1179,12 +1168,6 @@ function fundNextLabel(f) {
 // Roughly what this fund costs per month, for sanity-checking against real spending.
 function fundMonthlyRate(f) {
   return roundCent((f.amount || 0) * (PAYCHECKS_PER_MONTH / Math.max(1, f.everyN || 1)));
-}
-
-// "Gas" → "Gas Fund", but "Gas Fund" stays "Gas Fund".
-function fundRowLabel(key) {
-  const label = data.categories[key]?.label || 'Fund';
-  return /fund$/i.test(label.trim()) ? label : label + ' Fund';
 }
 
 // Extra category lines handed to the receipt scanner so a fill-up lands in the
@@ -1265,8 +1248,8 @@ function renderHeader() {
   const el = document.getElementById('header-balance');
   el.textContent = fmt(savings);
   el.className = savings < 0 ? 'negative' : '';
-  // Header shows spendable checking (total minus bill reserves and fund set-asides)
-  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data) - totalFundReserves(data));
+  // Header shows spendable checking (total minus bill reserves)
+  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data));
   document.getElementById('header-checking-amt').textContent = fmt(spendable);
 }
 
@@ -1282,15 +1265,13 @@ function renderDashboard() {
   // Checking
   const checkingTotal = data.checkingBalance || 0;
   const billReserve = totalBillReserves(data);
-  const fundReserve = totalFundReserves(data);
-  const available = roundCent(checkingTotal - billReserve - fundReserve);
+  const available = roundCent(checkingTotal - billReserve);
   const transferred = getTransferredAmount();
   document.getElementById('dash-checking').textContent = fmt(checkingTotal);
 
-  // Build the meta line: reserve + funds + available + savings-transferred info
+  // Build the meta line: reserve + available + savings-transferred info
   const metaParts = [];
   if (billReserve > 0) metaParts.push(`💸 ${fmt(billReserve)} reserved for bills`);
-  if (fundReserve > 0) metaParts.push(`💰 ${fmt(fundReserve)} set aside in funds`);
   metaParts.push(`${fmt(available)} available to spend`);
   if (transferred > 0) metaParts.push(`${fmt(transferred)} moved to savings`);
   document.getElementById('dash-checking-meta').textContent = metaParts.join(' · ');
@@ -1310,8 +1291,8 @@ function renderDashboard() {
     </div>`;
   }).join('');
 
-  // Spending grid
-  document.getElementById('dash-spending').innerHTML = SPENDING_KEYS.map(k => {
+  // Spending grid — percentage buckets first, then flat-amount buckets (gas)
+  const pctCards = SPENDING_KEYS.map(k => {
     const cat = data.categories[k];
     const bal = cat.balance;
     const isNeg = bal < 0;
@@ -1319,10 +1300,20 @@ function renderDashboard() {
       <div class="cat-label">${cat.icon} ${cat.label}</div>
       <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
     </div>`;
-  }).join('');
+  });
+  const flatCards = activeFunds(data).map(f => {
+    const bal = fundBal(data, f);
+    const isNeg = bal < 0;
+    return `<div class="cat-card flat-bucket" onclick="openEditFund('${f.id}')">
+      <div class="cat-label">${f.icon} ${escHtml(f.label)}</div>
+      <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
+      <div class="cat-sub">${fmt(f.amount)} ${fundFreqLabel(f).toLowerCase()}</div>
+    </div>`;
+  });
+  document.getElementById('dash-spending').innerHTML = pctCards.concat(flatCards).join('');
 
   // Spending total
-  const spendTotal = roundCent(SPENDING_KEYS.reduce((s,k) => s + (data.categories[k]?.balance||0), 0));
+  const spendTotal = roundCent(SPENDING_KEYS.reduce((s,k) => s + (data.categories[k]?.balance||0), 0) + totalFundBalances(data));
   const stEl = document.getElementById('spending-total');
   stEl.textContent = fmt(spendTotal);
   stEl.style.color = spendTotal < 0 ? 'var(--danger)' : 'var(--success)';
@@ -1408,7 +1399,7 @@ function renderPaychecks() {
       <td></td>
       <td style="color:var(--warning)">${billContribTotal > 0 ? '-' : ''}${fmt(billContribTotal)}</td>
     </tr>` + (lastP.fundContributions || []).map(fc => `<tr>
-      <td style="color:var(--warning)">${data.categories[fc.key]?.icon || '💰'} ${escHtml(fundRowLabel(fc.key))}</td>
+      <td style="color:var(--warning)">${data.categories[fc.key]?.icon || '💰'} ${escHtml(data.categories[fc.key]?.label || 'Bucket')}</td>
       <td></td>
       <td style="color:var(--warning)">-${fmt(fc.amount)}</td>
     </tr>`).join('');
@@ -1416,7 +1407,7 @@ function renderPaychecks() {
       <div style="margin-bottom:12px">
         <div style="font-size:20px;font-weight:800">${fmt(lastP.grossAmount)}</div>
         <div class="text-sm text-muted">${fmtDate(lastP.date)}</div>
-        <div class="text-xs text-muted" style="margin-top:4px">${fmt(remainingAfterBills)} split by % after bill reserves &amp; funds</div>
+        <div class="text-xs text-muted" style="margin-top:4px">${fmt(remainingAfterBills)} split by % after bill reserves &amp; flat buckets</div>
       </div>
       <table class="split-table">${billContribLine}${rows}</table>`;
   } else {
@@ -1463,7 +1454,7 @@ function renderGoals() {
     </div>`;
   }).join('');
 
-  document.getElementById('spending-budgets').innerHTML = SPENDING_KEYS.map(k => {
+  const pctBudgets = SPENDING_KEYS.map(k => {
     const cat = data.categories[k];
     const lastP = data.paychecks[0];
     const weekly = lastP ? (lastP.splits[k]||0) : 0;
@@ -1478,7 +1469,26 @@ function renderGoals() {
       </div>
       ${isNeg?'<div class="text-sm text-danger" style="margin-top:6px">⚠️ Over budget — this carries forward</div>':''}
     </div>`;
-  }).join('');
+  });
+
+  // Flat-amount buckets sit in the same list, funded by dollars instead of a %
+  const flatBudgets = activeFunds(data).map(f => {
+    const bal = fundBal(data, f);
+    const isNeg = bal < 0;
+    return `<div class="card" style="margin-bottom:10px" onclick="openEditFund('${f.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:15px;font-weight:700">${f.icon} ${escHtml(f.label)}</div>
+          <div class="text-sm text-muted">${fmt(f.amount)} ${fundFreqLabel(f).toLowerCase()} · about ${fmt(fundMonthlyRate(f))}/mo</div>
+        </div>
+        <div style="font-size:22px;font-weight:800;color:${isNeg?'var(--danger)':'var(--success)'}">${fmt(bal)}</div>
+      </div>
+      <div class="text-sm text-muted" style="margin-top:6px">${fundNextLabel(f)} · ${fmt(fundSpentThisMonth(data, f))} spent this month</div>
+      ${isNeg?'<div class="text-sm text-danger" style="margin-top:6px">⚠️ Over budget — this carries forward</div>':''}
+    </div>`;
+  });
+
+  document.getElementById('spending-budgets').innerHTML = pctBudgets.concat(flatBudgets).join('');
 }
 
 // ── Bills ───────────────────────────────────────────────
@@ -1551,53 +1561,23 @@ function renderBills() {
   }
 }
 
-// ── Paycheck funds ──────────────────────────────────────
+// ── Flat-amount buckets (settings list; the buckets themselves render in the
+//    dashboard's Spending Buckets grid alongside the percentage ones) ─────────
 function renderFunds() {
   const funds = data.funds || [];
-
-  // Dashboard list
-  const dashEl = document.getElementById('dash-funds');
-  if (dashEl) {
-    const active = funds.filter(f => f.active);
-    if (!active.length) {
-      dashEl.innerHTML = '<div class="empty-state" style="padding:16px 0">No funds yet — add one for gas or anything else you set aside per paycheck</div>';
-    } else {
-      dashEl.innerHTML = active.map(f => {
-        const bal = fundBal(data, f);
-        return `<div class="bill-fund-item">
-          <div class="bill-fund-header">
-            <div class="bill-fund-name">${f.icon} ${escHtml(f.label)}</div>
-            <div class="fund-balance" style="color:${bal < 0 ? 'var(--danger)' : 'var(--success)'}">${fmt(bal)}</div>
-          </div>
-          <div class="bill-fund-amounts">
-            <strong>${fmt(f.amount)}</strong> ${fundFreqLabel(f).toLowerCase()} · about <strong>${fmt(fundMonthlyRate(f))}</strong> a month
-          </div>
-          <div class="bill-fund-meta"><span>${fundNextLabel(f)}</span></div>
-          <div class="bill-fund-meta">${fmt(fundSpentThisMonth(data, f))} spent this month · ${fmt(f.totalContributed || 0)} set aside all time</div>
-          <div class="fund-actions">
-            <button class="btn btn-secondary btn-sm" onclick="openManualExpense('', '${f.key}', '')" style="padding:8px 10px;font-size:13px">＋ Log a purchase</button>
-            <button class="btn btn-secondary btn-sm" onclick="openEditFund('${f.id}')" style="padding:8px 10px;font-size:13px">Edit</button>
-          </div>
-        </div>`;
-      }).join('');
-    }
-  }
-
-  // Settings list
   const settingsEl = document.getElementById('settings-funds');
-  if (settingsEl) {
-    if (!funds.length) {
-      settingsEl.innerHTML = '<div class="empty-state">No funds yet</div>';
-    } else {
-      settingsEl.innerHTML = funds.map(f => `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
-        <div class="sr-label" style="flex:1;min-width:0">
-          <div style="font-weight:700">${f.icon} ${escHtml(f.label)}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${fmt(f.amount)} · ${fundFreqLabel(f).toLowerCase()} · ${fmt(fundBal(data, f))} saved${f.active ? '' : ' · <span style="color:var(--danger)">inactive</span>'}</div>
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="openEditFund('${f.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
-      </div>`).join('');
-    }
+  if (!settingsEl) return;
+  if (!funds.length) {
+    settingsEl.innerHTML = '<div class="empty-state">No flat-amount buckets yet</div>';
+    return;
   }
+  settingsEl.innerHTML = funds.map(f => `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
+    <div class="sr-label" style="flex:1;min-width:0">
+      <div style="font-weight:700">${f.icon} ${escHtml(f.label)}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${fmt(f.amount)} · ${fundFreqLabel(f).toLowerCase()} · about ${fmt(fundMonthlyRate(f))}/mo · ${fmt(fundBal(data, f))} in the bucket${f.active ? '' : ' · <span style="color:var(--danger)">inactive</span>'}</div>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="openEditFund('${f.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
+  </div>`).join('');
 }
 
 // ── Settings ────────────────────────────────────────────
@@ -1682,10 +1662,10 @@ function openPaycheckModal() {
       </div>
     </div>
     <button class="btn btn-primary" onclick="submitPaycheck('full')" style="margin-bottom:8px">Add Paycheck 💵
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Bill reserves and paycheck funds are set aside first, then splits the rest. Full amount goes to checking — check off savings transfers manually.</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Bill reserves and flat-amount buckets are set aside first, then splits the rest. Full amount goes to checking — check off savings transfers manually.</div>
     </button>
     <button class="btn btn-secondary" onclick="submitPaycheck('nobalances')" style="margin-bottom:8px">Already Deposited 🏦
-      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds to spending buckets only — skips savings, checking, bill reserves &amp; funds</div>
+      <div style="font-size:11px;font-weight:400;opacity:0.7;margin-top:2px">Adds to percentage buckets only — skips savings, checking, bill reserves &amp; flat buckets</div>
     </button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
@@ -1786,7 +1766,7 @@ function openDeletePaycheck(paycheckId) {
       ${SPENDING_KEYS.map(k => p.splits[k] > 0 ? `<li>${data.categories[k].icon} ${data.categories[k].label} −${fmt(p.splits[k]||0)}</li>` : '').join('')}
       ${checkedTotal > 0 ? checkedTransfers.map(t => `<li>${data.categories[t.key]?.icon||''} ${data.categories[t.key]?.label||t.key} savings −${fmt(t.amount)} (transfer was checked)</li>`).join('') : '<li>No savings transfers to reverse (none were checked)</li>'}
       ${p.billContributionsTotal > 0 ? `<li>💸 Bill reserves −${fmt(p.billContributionsTotal)} (redistributed to bills)</li>` : ''}
-      ${(p.fundContributions||[]).map(fc => `<li>${data.categories[fc.key]?.icon||'💰'} ${escHtml(data.categories[fc.key]?.label||'Fund')} fund −${fmt(fc.amount)} (paycheck set-aside)</li>`).join('')}
+      ${(p.fundContributions||[]).map(fc => `<li>${data.categories[fc.key]?.icon||'💰'} ${escHtml(data.categories[fc.key]?.label||'Bucket')} −${fmt(fc.amount)} (flat set-aside)</li>`).join('')}
     </ul>
     <div style="font-size:12px;color:var(--warning);margin-bottom:16px">⚠️ Bill reserves can't be perfectly un-split per bill — the total will be subtracted proportionally.</div>
     <button class="btn btn-danger" onclick="deletePaycheck('${paycheckId}')">Yes, Delete This Paycheck</button>
@@ -1993,7 +1973,7 @@ function openAdjustChecking(dir) {
           <optgroup label="Savings Goals">
             ${SAVINGS_KEYS.map(k => `<option value="${k}">${data.categories[k].icon} ${data.categories[k].label}</option>`).join('')}
           </optgroup>
-          ${activeFunds(data).length ? `<optgroup label="Paycheck Funds">
+          ${activeFunds(data).length ? `<optgroup label="Flat-Amount Buckets">
             ${activeFunds(data).map(f => `<option value="${f.key}">${f.icon} ${escHtml(f.label)}</option>`).join('')}
           </optgroup>` : ''}
         </select>
@@ -2681,10 +2661,10 @@ function fundFormHTML(f) {
 }
 
 function openAddFund() {
-  document.getElementById('modal-title').textContent = 'Add Paycheck Fund';
+  document.getElementById('modal-title').textContent = 'Add Flat-Amount Bucket';
   document.getElementById('modal-body').innerHTML = `
     ${fundFormHTML(null)}
-    <button class="btn btn-primary" onclick="submitFund(null)">Save Fund</button>
+    <button class="btn btn-primary" onclick="submitFund(null)">Save Bucket</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
   updateFundEstimate();
@@ -2695,7 +2675,7 @@ function openEditFund(id) {
   const f = (data.funds||[]).find(x => x.id === id);
   if (!f) return;
   const bal = fundBal(data, f);
-  document.getElementById('modal-title').textContent = 'Edit Fund';
+  document.getElementById('modal-title').textContent = 'Edit Bucket';
   document.getElementById('modal-body').innerHTML = `
     ${fundFormHTML(f)}
     <div class="form-group">
@@ -2703,7 +2683,7 @@ function openEditFund(id) {
       <div class="input-wrap"><span class="dollar-sign">$</span>
         <input class="form-input dollar" type="number" step="0.01" id="fund-balance" value="${bal.toFixed(2)}">
       </div>
-      <div class="text-xs text-muted mt-8">This money lives in your checking account — it's just earmarked.</div>
+      <div class="text-xs text-muted mt-8">What's in the bucket right now — correct it here if it drifts from real life.</div>
     </div>
     <div class="form-group" style="display:flex;align-items:center;gap:12px">
       <label class="form-label" style="margin:0;flex:1">Take it out of my next paycheck</label>
@@ -2714,7 +2694,7 @@ function openEditFund(id) {
       <input type="checkbox" id="fund-active" style="width:20px;height:20px;accent-color:var(--accent)" ${f.active?'checked':''}>
     </div>
     <button class="btn btn-primary" onclick="submitFund('${id}')">Save Changes</button>
-    <div class="mt-8"><button class="btn btn-danger" onclick="deleteFund('${id}')">Delete Fund</button></div>
+    <div class="mt-8"><button class="btn btn-danger" onclick="deleteFund('${id}')">Delete Bucket</button></div>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
   updateFundEstimate();
@@ -2762,7 +2742,7 @@ function deleteFund(id) {
   const f = (data.funds||[]).find(x => x.id === id);
   if (!f) return;
   const bal = fundBal(data, f);
-  if (!confirm(`Delete the ${f.label} fund?\n\nNothing more comes out of your paychecks for it. The ${fmt(bal)} already set aside stays in your checking balance, and past purchases stay in your history.`)) return;
+  if (!confirm(`Delete the ${f.label} bucket?\n\nNothing more comes out of your paychecks for it. The ${fmt(bal)} already set aside stays in your checking balance, and past purchases stay in your history.`)) return;
   data.funds = data.funds.filter(x => x.id !== id);
   saveData(data);
   hideModal();
