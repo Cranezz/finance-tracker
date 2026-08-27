@@ -266,7 +266,7 @@
     .bill-fund-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
     .bill-fund-meta span { color: var(--accent); font-weight: 600; }
 
-    /* Paycheck funds (gas, investing…) */
+    /* Paycheck funds (gas, etc.) */
     .fund-balance { font-size: 19px; font-weight: 800; }
     .fund-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
     .fund-actions .btn { flex: 1; min-width: 120px; }
@@ -443,7 +443,7 @@
       </div>
       <div class="cat-grid" id="dash-spending"></div>
 
-      <!-- Paycheck funds (flat dollar set-asides: gas, investing…) -->
+      <!-- Paycheck funds (flat dollar set-asides: gas, etc.) -->
       <div class="section-header mt-12">
         <div class="section-title">Paycheck Funds</div>
         <button class="btn btn-secondary btn-sm" onclick="openAddFund()" style="padding:6px 12px;font-size:13px">+ Add</button>
@@ -607,7 +607,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.8.0</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.8.1</div>
         <div class="text-xs text-muted">Last updated Aug 2026</div>
       </div>
     </div>
@@ -687,7 +687,7 @@ function guessCategory(name) {
   const lower = name.toLowerCase();
   // Paycheck funds win over the normal buckets — a gas purchase should come out
   // of the Gas fund, not Misc. Match the fund's own name first, then gas keywords.
-  const funds = spendFunds(data);
+  const funds = activeFunds(data);
   const byName = funds.find(f => f.label && lower.includes(f.label.toLowerCase()));
   if (byName) return byName.key;
   const gasFund = funds.find(f => f.key === 'gas');
@@ -715,7 +715,7 @@ function freshData() {
     checkingBalance: 0,
     transfers: [], // { paycheckId, items: [{key, amount, checked}] }
     bills: [],     // { id, label, amount, category, active, recurYears, recurMonths, recurWeeks, recurDays, endOfMonth, nextDueOverride, lastAppliedDate }
-    funds: [],     // { id, key, label, icon, amount, everyN, paychecksUntilNext, kind, active, totalContributed, totalMovedOut }
+    funds: [],     // { id, key, label, icon, amount, everyN, paychecksUntilNext, active, totalContributed }
   };
 }
 
@@ -803,7 +803,7 @@ function processNewPaycheck(d, grossAmount) {
     billContributionsTotal = roundCent(billContributionsTotal + contrib);
   });
 
-  // Step 1b: flat-dollar fund set-asides (gas, investing…) also come off the top
+  // Step 1b: flat-dollar fund set-asides (gas, etc.) also come off the top
   const fundContribs = applyFundContributions(d);
 
   // Step 2: split the remaining amount by category percentages
@@ -1086,16 +1086,12 @@ function processDueBills(d) {
 }
 
 // ══════════════════════════════════════════════════
-//  PAYCHECK FUNDS  (gas, investing, anything else)
+//  PAYCHECK FUNDS  (gas, or anything else set aside per paycheck)
 //  A fund pulls a FIXED DOLLAR AMOUNT out of a paycheck instead of a percentage,
 //  on a schedule counted in PAYCHECKS — every paycheck, every other paycheck,
 //  every 3rd — never by calendar date. Like bills, the money comes off the top
-//  before the percentage split. Two kinds:
-//    kind:'spend'    — the money stays in checking, earmarked, until it's spent
-//                      (gas). Purchases are logged against it like any bucket.
-//    kind:'external' — the money is meant to leave checking for another account
-//                      (investing). It piles up as "ready to move", then the user
-//                      taps "I moved it" and checking goes down by that amount.
+//  before the percentage split. The money stays in checking, earmarked, until
+//  it's spent; purchases are logged against the fund like any spending bucket.
 //  A fund's BALANCE lives in data.categories[fund.key].balance so every existing
 //  expense / edit / delete / analytics path works on it with no special-casing.
 //  A fund's SCHEDULE lives on the fund object itself.
@@ -1127,11 +1123,12 @@ function migrateFunds(d) {
   d.funds.forEach(f => {
     if (f.everyN === undefined) f.everyN = 1;
     if (f.paychecksUntilNext === undefined) f.paychecksUntilNext = 0;
-    if (f.kind === undefined) f.kind = 'spend';
     if (f.active === undefined) f.active = true;
     if (!f.icon) f.icon = '💰';
     if (f.totalContributed === undefined) f.totalContributed = 0;
-    if (f.totalMovedOut === undefined) f.totalMovedOut = 0;
+    // The old "transfer out" kind is gone — any fund made with it keeps its money
+    // and simply becomes a normal set-aside fund.
+    delete f.kind;
   });
 
   // One-time seed of the Gas fund the app now ships with. Guarded by a flag so a
@@ -1141,8 +1138,8 @@ function migrateFunds(d) {
     if (!d.funds.some(f => f.key === 'gas')) {
       d.funds.push({
         id: uid(), key: 'gas', label: 'Gas', icon: '⛽',
-        amount: 25, everyN: 1, paychecksUntilNext: 0, kind: 'spend',
-        active: true, totalContributed: 0, totalMovedOut: 0,
+        amount: 25, everyN: 1, paychecksUntilNext: 0,
+        active: true, totalContributed: 0,
         scanHint: 'gas station, fuel, filling up the tank',
       });
     }
@@ -1153,7 +1150,6 @@ function migrateFunds(d) {
 }
 
 function activeFunds(d) { return (d.funds || []).filter(f => f.active); }
-function spendFunds(d)  { return (d.funds || []).filter(f => f.active && f.kind !== 'external'); }
 function fundBal(d, f)  { return roundCent(d.categories[f.key]?.balance || 0); }
 
 function addToFund(d, f, amt) {
@@ -1194,7 +1190,7 @@ function fundRowLabel(key) {
 // Extra category lines handed to the receipt scanner so a fill-up lands in the
 // Gas fund instead of Misc. Returns '' when there are no spendable funds.
 function fundScanCategoryLines() {
-  return spendFunds(data).map(f => `\n- ${f.key} (${f.scanHint || f.label.toLowerCase()})`).join('');
+  return activeFunds(data).map(f => `\n- ${f.key} (${f.scanHint || f.label.toLowerCase()})`).join('');
 }
 
 function fundSpentThisMonth(d, f) {
@@ -1564,11 +1560,10 @@ function renderFunds() {
   if (dashEl) {
     const active = funds.filter(f => f.active);
     if (!active.length) {
-      dashEl.innerHTML = '<div class="empty-state" style="padding:16px 0">No funds yet — add one for gas, investing, or anything you set aside per paycheck</div>';
+      dashEl.innerHTML = '<div class="empty-state" style="padding:16px 0">No funds yet — add one for gas or anything else you set aside per paycheck</div>';
     } else {
       dashEl.innerHTML = active.map(f => {
         const bal = fundBal(data, f);
-        const isExternal = f.kind === 'external';
         return `<div class="bill-fund-item">
           <div class="bill-fund-header">
             <div class="bill-fund-name">${f.icon} ${escHtml(f.label)}</div>
@@ -1578,13 +1573,9 @@ function renderFunds() {
             <strong>${fmt(f.amount)}</strong> ${fundFreqLabel(f).toLowerCase()} · about <strong>${fmt(fundMonthlyRate(f))}</strong> a month
           </div>
           <div class="bill-fund-meta"><span>${fundNextLabel(f)}</span></div>
-          <div class="bill-fund-meta">${isExternal
-            ? `${fmt(f.totalMovedOut || 0)} moved to this account so far`
-            : `${fmt(fundSpentThisMonth(data, f))} spent this month · ${fmt(f.totalContributed || 0)} set aside all time`}</div>
+          <div class="bill-fund-meta">${fmt(fundSpentThisMonth(data, f))} spent this month · ${fmt(f.totalContributed || 0)} set aside all time</div>
           <div class="fund-actions">
-            ${isExternal
-              ? `<button class="btn btn-secondary btn-sm" onclick="moveFundOut('${f.id}')" style="padding:8px 10px;font-size:13px">✅ I moved it</button>`
-              : `<button class="btn btn-secondary btn-sm" onclick="openManualExpense('', '${f.key}', '')" style="padding:8px 10px;font-size:13px">＋ Log a purchase</button>`}
+            <button class="btn btn-secondary btn-sm" onclick="openManualExpense('', '${f.key}', '')" style="padding:8px 10px;font-size:13px">＋ Log a purchase</button>
             <button class="btn btn-secondary btn-sm" onclick="openEditFund('${f.id}')" style="padding:8px 10px;font-size:13px">Edit</button>
           </div>
         </div>`;
@@ -1671,7 +1662,7 @@ function handleModalBg(e) { if (e.target===document.getElementById('modal-overla
 // fund (deleted fund with history) is still included when it's the current
 // selection, so editing an old purchase can't silently re-categorize it.
 function catOptions(selectedKey) {
-  const keys = ALL_KEYS.concat(spendFunds(data).map(f => f.key));
+  const keys = ALL_KEYS.concat(activeFunds(data).map(f => f.key));
   if (selectedKey && !keys.includes(selectedKey) && data.categories[selectedKey]) keys.push(selectedKey);
   return keys.map(k => {
     const c = data.categories[k];
@@ -2667,7 +2658,7 @@ function fundFormHTML(f) {
   return `
     <div class="form-group">
       <label class="form-label">Name</label>
-      <input class="form-input" type="text" id="fund-label" placeholder="e.g. Gas, Investing" maxlength="30" value="${f ? escHtml(f.label) : ''}">
+      <input class="form-input" type="text" id="fund-label" placeholder="e.g. Gas" maxlength="30" value="${f ? escHtml(f.label) : ''}">
     </div>
     <div class="form-group">
       <label class="form-label">Icon</label>
@@ -2686,16 +2677,6 @@ function fundFormHTML(f) {
       </div>
       <div class="text-xs text-muted mt-8" id="fund-estimate"></div>
       <div class="text-xs text-muted mt-8">Counted in paychecks, not calendar months.</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Kind</label>
-      <div class="form-select-wrap">
-        <select class="form-select" id="fund-kind">
-          <option value="spend"${!f || f.kind !== 'external' ? ' selected' : ''}>Spending money (like gas)</option>
-          <option value="external"${f && f.kind === 'external' ? ' selected' : ''}>Transfer out (like investing)</option>
-        </select>
-      </div>
-      <div class="text-xs text-muted mt-8">Spending money stays in checking until you spend it. Transfer out is for an investing or outside savings account — the app piles it up and tells you what's waiting to be moved.</div>
     </div>`;
 }
 
@@ -2744,7 +2725,6 @@ function submitFund(id) {
   const icon = (document.getElementById('fund-icon')?.value || '').trim() || '💰';
   const amount = parseFloat(document.getElementById('fund-amount')?.value);
   const everyN = Math.max(1, parseInt(document.getElementById('fund-every')?.value) || 1);
-  const kind = document.getElementById('fund-kind')?.value === 'external' ? 'external' : 'spend';
 
   if (!label) { alert('Enter a name'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
@@ -2754,7 +2734,7 @@ function submitFund(id) {
   if (id) {
     const f = data.funds.find(x => x.id === id);
     if (!f) return;
-    f.label = label; f.icon = icon; f.amount = roundCent(amount); f.everyN = everyN; f.kind = kind;
+    f.label = label; f.icon = icon; f.amount = roundCent(amount); f.everyN = everyN;
     f.active = document.getElementById('fund-active')?.checked !== false;
     f.paychecksUntilNext = document.getElementById('fund-next')?.checked
       ? 0
@@ -2768,8 +2748,7 @@ function submitFund(id) {
       id: uid(),
       key: 'fund_' + uid().replace(/-/g,'').slice(0,10),
       label, icon, amount: roundCent(amount), everyN,
-      paychecksUntilNext: 0, kind, active: true,
-      totalContributed: 0, totalMovedOut: 0,
+      paychecksUntilNext: 0, active: true, totalContributed: 0,
     });
     ensureFundCategories(data);
   }
@@ -2787,23 +2766,6 @@ function deleteFund(id) {
   data.funds = data.funds.filter(x => x.id !== id);
   saveData(data);
   hideModal();
-  renderAll();
-}
-
-// "Transfer out" funds (investing): the money leaves checking when the user
-// actually moves it in their bank app and taps this.
-function moveFundOut(id) {
-  const f = (data.funds||[]).find(x => x.id === id);
-  if (!f) return;
-  const bal = fundBal(data, f);
-  if (bal <= 0) { alert('Nothing waiting to be moved yet.'); return; }
-  if (!confirm(`Move ${fmt(bal)} out of checking into your ${f.label} account?\n\nDo this right after you actually transfer it in your bank app.`)) return;
-  data.checkingBalance = roundCent((data.checkingBalance||0) - bal);
-  addToFund(data, f, -bal);
-  f.totalMovedOut = roundCent((f.totalMovedOut||0) + bal);
-  if (!f.moves) f.moves = [];
-  f.moves.unshift({ date: todayISO(), amount: bal });
-  saveData(data);
   renderAll();
 }
 

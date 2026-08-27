@@ -244,7 +244,7 @@ c13b8d9 v2026.6.1 — Add bill sinking funds, fix transfer bug, add Analytics   
 
 ---
 
-## 10. Session v2026.8.0 — Paycheck Funds (gas, investing)
+## 10. Session v2026.8.0 → v2026.8.1 — Paycheck Funds (gas)
 
 **User request:** "I need a spot in my app for gas… instead of a percentage of my paycheck you take out a certain amount. Let me edit this amount somewhere, kind of like the bills but in a separate area… change the amount and how often, like every paycheck, every other paycheck… this doesn't calculate by calendar but by paycheck. Take out $25 each paycheck." Plus two questions: can the app pull transactions straight from his bank, and can he get an area for his investing account.
 
@@ -253,22 +253,20 @@ A second set-aside system, deliberately separate from Bills. Bills answer *"a kn
 
 **Data model (`data.funds`, plus `data.fundsSeeded`):**
 ```js
-{ id, key, label, icon, amount, everyN, paychecksUntilNext, kind:'spend'|'external',
-  active, totalContributed, totalMovedOut, scanHint?, moves? }
+{ id, key, label, icon, amount, everyN, paychecksUntilNext, active, totalContributed, scanHint? }
 ```
 - **A fund's balance is NOT on the fund object.** It lives in `data.categories[fund.key].balance`, registered by `ensureFundCategories()` as a pseudo-category (`isFund:true`, `type:'spending'`, `percent:0`). That's the key design decision: every existing expense path (`logExpense`, `saveEditExpense`, `deleteExpense`, analytics, recent-purchases list) works on funds with **zero** special-casing. The fund object holds only the schedule.
 - Fund keys are **not** in `ALL_KEYS`, so `resolvePercents`, the % settings editor, and the paycheck split never see them.
-- `kind:'spend'` (gas): money stays in checking, earmarked; purchases are logged against it like a bucket.
-- `kind:'external'` (investing): money piles up as "ready to move"; `moveFundOut()` deducts checking when the user taps "I moved it" and adds to `totalMovedOut`. No expense is logged — investing isn't spending, and logging one would pollute Total Spent.
+- Money stays in checking, earmarked, until it's spent; purchases are logged against the fund like a bucket.
 - Fund balances are earmarked inside checking exactly like bill reserves: header + dashboard spendable = `checking − totalBillReserves − totalFundReserves`. A negative (overspent) fund is floored at 0 there so it can't inflate spendable money.
 
 **Scheduling:** `paychecksUntilNext` counts down on every paycheck. 0 = contributes on the next one, then resets to `everyN − 1`. Contributions come **off the top** alongside bill reserves, before the % split. The paycheck record stores `fundContributionsTotal` + `fundContributions:[{fundId,key,amount}]` so `deletePaycheck` reverses the exact amounts (`reverseFundContributions`); countdowns are only restored precisely when the deleted paycheck was the newest one, which is noted in the code.
 
 **Seeded on first load:** a Gas fund — $25, every paycheck, ⛽ — guarded by `data.fundsSeeded` so a deleted Gas fund never comes back. ($25/wk ≈ $108/mo; the user's gas is $205/mo and his parents cover every other fill-up.)
 
-**UI:** "Paycheck Funds" section on the dashboard between Spending Buckets and Bills (reuses the `.bill-fund-*` classes), a management card in Settings, an add/edit modal (name, icon, amount, how-often select, kind, balance correction, "take it out of my next paycheck", active, delete), a "Log a purchase" shortcut on spend funds, "I moved it" on external ones, and a per-fund line in the paycheck breakdown + delete-paycheck reversal list.
+**UI:** "Paycheck Funds" section on the dashboard between Spending Buckets and Bills (reuses the `.bill-fund-*` classes), a management card in Settings, an add/edit modal (name, icon, amount, how-often select, balance correction, "take it out of my next paycheck", active, delete), a "Log a purchase" shortcut on each fund, and a per-fund line in the paycheck breakdown + delete-paycheck reversal list.
 
-**Also wired in:** `catOptions` now appends spendable funds (and keeps an unknown selected key so editing an old purchase can't silently re-categorize it — this is why `spendingCatOptions` is now just a delegate); gas keywords in `guessCategory` (fund names are matched first); `fundScanCategoryLines()` injects fund categories into both receipt-scanner prompts, so a fill-up scans straight into the Gas fund.
+**Also wired in:** `catOptions` now appends active funds (and keeps an unknown selected key so editing an old purchase can't silently re-categorize it — this is why `spendingCatOptions` is now just a delegate); gas keywords in `guessCategory` (fund names are matched first); `fundScanCategoryLines()` injects fund categories into both receipt-scanner prompts, so a fill-up scans straight into the Gas fund.
 
 ### Gotchas for the next agent
 1. **Never store a fund balance on the fund object.** Two sources of truth for money is how you get drift. `fundBal(d,f)` / `addToFund(d,f,amt)` are the only accessors.
@@ -279,7 +277,7 @@ A second set-aside system, deliberately separate from Bills. Bills answer *"a kn
 
 ### Answered, not built
 - **Bank connection:** not possible from this app as it stands. A static `index.html` on GitHub Pages has no server, and aggregators (Plaid/Teller/MX) require a backend to hold secrets plus a business agreement — an API key in localStorage would be exposed. The offered path is a **CSV/OFX import**: export transactions from the bank, paste or upload, auto-categorize into buckets and funds. Not built this session.
-- **Investing account:** covered by `kind:'external'` funds — the user adds one via + Add Fund. Not seeded, since no amount was specified.
+- **Investing account:** **dropped at the user's request** in v2026.8.1. v2026.8.0 had shipped a second fund kind (`kind:'external'`) for money moved out to a brokerage, with an "I moved it" button and a `totalMovedOut` counter. The user's follow-up: *"Get rid of the investing thing, that was only if I could connect the banks account."* All of it is gone — the Kind selector, `moveFundOut()`, `spendFunds()` (now just `activeFunds()`), and the external branches in `renderFunds`. `migrateFunds` deletes a stale `kind` field, so a fund created under v2026.8.0 keeps its money and becomes an ordinary set-aside fund rather than being destroyed. **Don't re-add a fund kind unless the user asks** — and note the request was conditional on bank syncing, so it may come back if a CSV/bank-import path ever lands.
 
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*
