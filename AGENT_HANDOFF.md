@@ -286,5 +286,44 @@ User-facing vocabulary is now "flat-amount bucket", not "fund" — "fund" is res
 - **Bank connection:** not possible from this app as it stands. A static `index.html` on GitHub Pages has no server, and aggregators (Plaid/Teller/MX) require a backend to hold secrets plus a business agreement — an API key in localStorage would be exposed. The offered path is a **CSV/OFX import**: export transactions from the bank, paste or upload, auto-categorize into buckets and funds. Not built this session.
 - **Investing account:** **dropped at the user's request** in v2026.8.1. v2026.8.0 had shipped a second fund kind (`kind:'external'`) for money moved out to a brokerage, with an "I moved it" button and a `totalMovedOut` counter. The user's follow-up: *"Get rid of the investing thing, that was only if I could connect the banks account."* All of it is gone — the Kind selector, `moveFundOut()`, `spendFunds()` (now just `activeFunds()`), and the external branches in `renderFunds`. `migrateFunds` deletes a stale `kind` field, so a fund created under v2026.8.0 keeps its money and becomes an ordinary set-aside fund rather than being destroyed. **Don't re-add a fund kind unless the user asks** — and note the request was conditional on bank syncing, so it may come back if a CSV/bank-import path ever lands.
 
+## 11. Session v2026.9.0 — Two people, custom categories, savings targets
+
+Six things in one release. Read §2's data model with this section beside it — the shape changed more here than in any session since the sinking funds.
+
+### The big structural change: categories are dynamic and per-person
+`ALL_KEYS` / `SAVINGS_KEYS` / `SPENDING_KEYS` **no longer exist**. They are now `allKeys(d)`, `savingsKeys(d)`, `spendingKeys(d)`, computed from `d.categories`, ordered by `cat.order`, and filtered to exclude `isFund`, `isGoal` and `archived` entries. Anything that iterates categories must go through them.
+
+Every category gained:
+- `owner`: `'shared'` or a person id — who sees it in their split.
+- `percents: {personId: number}` — replaces the single `percent`. Read with `catPercent(cat, personId)`, write with `setCatPercent`. `cat.percent` survives only as the pre-migration source and as `DEFAULT_CATEGORIES` reset values; **never read it for live math**.
+- `order`, `archived`, `custom`.
+
+`resolvePercents(d, personId)` replaces `resolvePercents(cats)` and resolves goal-met redirects per person.
+
+### People
+`d.people = [{id, name, icon}]`, seeded with **Me** and **Fiancée** (the user said she is about to start working). `d.activePersonId` remembers the last picker choice. Every paycheck carries `personId`. A new person is seeded with a **copy of the main person's split** so their first paycheck isn't silently split 0% everywhere — that bug bit during development and `migratePeople` now guards it.
+
+**`paidBy` on bills, funds and goals is not optional.** Without it, a $25 gas set-aside comes out of *both* weekly paychecks. Migration pins every existing bill/fund to the first person. `paidByMatches(item, personId, d)` is the gate; `'any'` means whichever paycheck is next.
+
+### Savings targets (`d.goals`)
+`{id, key, label, icon, target, dueDate, paidBy, active}`. Balance lives in `d.categories[key]` as an `isGoal` pseudo-category — the same trick funds use, so expense/analytics paths need no special cases. Per paycheck it sets aside `remaining ÷ fridaysUntilDate(dueDate)`, which lands exactly on time with weekly Fridays (verified: $300 by Oct 23 from Sep 25 = 5 × $60) and self-corrects after a missed week because the final Friday's divisor is 1. **Targets are earmarked inside checking** (subtracted from spendable, like bill reserves) — unlike flat-amount buckets, which v2026.8.2 deliberately stopped earmarking. That asymmetry is intentional: a target is money you have promised to something.
+"I bought it" logs an expense for the **full target price** (not the saved balance) so spending history is honest, then zeroes and archives the bucket; any shortfall settles against ordinary checking.
+
+### Recency-weighted average paycheck
+`weightedAvgPaycheck(d, personId)` walks paychecks oldest→newest pulling a running average toward each one, **asymmetrically**: `AVG_PULL_UP = 0.45`, `AVG_PULL_DOWN = 0.18`. The user's exact ask: a raise should move it fast, a short week should barely dent it. Measured: 100 checks at $500 then one $620 → $554 (plain average: $501); three $620s → $600; steady $620 → exactly $620; one $400 week off a $620 baseline → $580. Known trade-off, stated to the user: choppy weeks read slightly high, so ETAs run slightly optimistic. `weeklyAllocRate` is now forward-looking (weighted paycheck × that person's share) instead of historical, so raises shorten goal ETAs immediately.
+
+### Deposit / withdraw fix (the user's bug report)
+`submitCheckingAdj` used to add to checking **and** the category, so depositing into savings inflated checking. Now one account picker serves both directions and the checking side follows the account type — savings moves alone, everything else moves with checking, because spending/fund/goal envelopes physically sit in checking. Withdraw got the same picker (it was checking-only before). `updateAdjustHint()` spells out which balances will move before you confirm. Adjustments are logged to `d.adjustments`.
+
+### Gotchas
+1. **Never read `cat.percent` for math** — see above.
+2. `guessCategory` used to hard-code `'misc'`; `misc` is deletable now, so it routes through `fallbackCategory()`. Anywhere else defaulting to a literal key needs the same treatment.
+3. Deleting a category **archives** it (`archived: true`) and makes you move its balance somewhere first — money must never vanish silently, and old expenses still need the label. Same for a completed/deleted savings target.
+4. `clearAllData()` now runs `migrateData(freshData())`; plain `freshData()` has no people and would break every renderer.
+5. Tested headlessly (per-person splits, no double-charging, goal funding across real Fridays with a faked clock, deposit/withdraw matrix, category CRUD, migration of the user's real v2026.8.2 data + idempotency) and smoke-tested in Chromium across all five tabs and every modal.
+
+### Asked for, not built: live sync between two phones
+The user wants his fiancée's phone to see the same data, suggesting a Google Sheet as the store with a pairing code. Not built this session, and the honest reasons: a static GitHub Pages page has no server to hold Google credentials, and two phones writing the same document needs real conflict handling — last-write-wins would quietly eat one person's entries. The workable path, if it comes back: a **Google Apps Script web app** the user deploys from his own account (it can read/write a Sheet and serve JSON without any secret living in the app), the app storing that deployment URL plus a shared code, and syncing an **append-only log of operations** rather than the whole document, so both phones can merge instead of overwrite. Quote him a realistic scope before starting; it is bigger than everything in this release put together.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

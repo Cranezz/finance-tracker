@@ -266,6 +266,12 @@
     .bill-fund-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
     .bill-fund-meta span { color: var(--accent); font-weight: 600; }
 
+    /* Person picker (whose paycheck / whose split) */
+    .person-pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .person-pick { flex: 1; min-width: 110px; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+                   border-radius: 10px; padding: 11px 10px; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; }
+    .person-pick.active { background: var(--accent)22; border-color: var(--accent); color: var(--text); }
+
     /* Flat-amount spending buckets (gas, etc.) — tap to edit */
     .cat-card .cat-sub { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
     .cat-card.flat-bucket { cursor: pointer; border-color: var(--accent)33; }
@@ -442,6 +448,15 @@
       </div>
       <div class="cat-grid" id="dash-spending"></div>
 
+      <!-- Savings targets -->
+      <div class="section-header mt-12">
+        <div class="section-title">Savings Targets</div>
+        <button class="btn btn-secondary btn-sm" onclick="openAddGoal()" style="padding:6px 12px;font-size:13px">+ Add</button>
+      </div>
+      <div class="card" style="padding:0 16px">
+        <div id="dash-goals"><div class="empty-state" style="padding:16px 0">No targets yet</div></div>
+      </div>
+
       <!-- Bills -->
       <div class="section-header mt-12">
         <div class="section-title">Bills & Sinking Funds</div>
@@ -502,6 +517,14 @@
       <div class="dave-note">
         <strong>Dave Ramsey's advice for your situation:</strong> You have zero living expenses — that's a superpower. Put 70% of every paycheck into savings goals. Hit your emergency fund first, then your wedding, then college. You're building real wealth before most people even start.
       </div>
+      <div class="section-header">
+        <div class="section-title">Savings Targets</div>
+        <button class="btn btn-secondary btn-sm" onclick="openAddGoal()" style="padding:6px 12px;font-size:13px">+ Add</button>
+      </div>
+      <div id="goals-targets"></div>
+      <div class="section-header mt-12">
+        <div class="section-title">Savings Goals</div>
+      </div>
       <div id="goals-list"></div>
       <div class="section-header mt-12">
         <div class="section-title">Spending Budgets</div>
@@ -535,10 +558,30 @@
         </div>
       </div>
 
+      <!-- People -->
+      <div class="card">
+        <div class="card-title">👥 People</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Everyone whose paycheck goes into this app. Each person gets their own paycheck split.</div>
+        <div id="settings-people"></div>
+        <div class="mt-12">
+          <button class="btn btn-secondary" onclick="openAddPerson()">+ Add Person</button>
+        </div>
+      </div>
+
+      <!-- Categories -->
+      <div class="card">
+        <div class="card-title">🗂️ Categories</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Add or remove buckets. A category can belong to one person or to both of you.</div>
+        <div id="settings-categories"></div>
+        <div class="mt-12">
+          <button class="btn btn-secondary" onclick="openAddCategory()">+ Add Category</button>
+        </div>
+      </div>
+
       <!-- Percentages -->
       <div class="card">
         <div class="card-title">Paycheck Split %</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">Must total 100%</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Each person's split must total 100% on its own.</div>
         <div id="settings-pcts"></div>
         <div class="pct-total" id="pct-total-display">Total: 100%</div>
         <div class="mt-12">
@@ -564,6 +607,16 @@
         <div id="settings-funds"></div>
         <div class="mt-12">
           <button class="btn btn-secondary" onclick="openAddFund()">+ Add Bucket</button>
+        </div>
+      </div>
+
+      <!-- Savings targets management -->
+      <div class="card">
+        <div class="card-title">🎯 Savings Targets</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">A one-off thing you're saving for by a certain date. Each paycheck puts aside what's left divided by the paychecks left, so it lands on time.</div>
+        <div id="settings-goals"></div>
+        <div class="mt-12">
+          <button class="btn btn-secondary" onclick="openAddGoal()">+ Add Target</button>
         </div>
       </div>
 
@@ -597,13 +650,14 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.8.2</div>
-        <div class="text-xs text-muted">Last updated Aug 2026</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.9.0</div>
+        <div class="text-xs text-muted">Last updated Sep 2026</div>
       </div>
     </div>
     <!-- Tab 4: Analytics -->
     <div id="tab-4" class="tab-content">
       <div class="analytics-grid" id="analytics-stats"></div>
+      <div id="analytics-people"></div>
 
       <div class="card">
         <div class="card-title">Spending by Category</div>
@@ -657,9 +711,15 @@ const DEFAULT_CATEGORIES = {
   misc:           { label: 'Miscellaneous',     balance: 0, goal: null,  percent: 5,  goalMet: false, redirectTo: null,             icon: '📦',  type: 'spending' },
 };
 
-const ALL_KEYS      = ['emergencyFund','weddingFund','collegeSavings','food','fun','clothing','misc'];
-const SAVINGS_KEYS  = ['emergencyFund','weddingFund','collegeSavings'];
-const SPENDING_KEYS = ['food','fun','clothing','misc'];
+// Categories are user-editable now, so the key lists are computed from the data
+// instead of being fixed. DEFAULT_ORDER only seeds the order of the originals.
+const DEFAULT_ORDER = ['emergencyFund','weddingFund','collegeSavings','food','fun','clothing','misc'];
+
+// Everyone whose paycheck this app tracks. Seeded in migrateData.
+const DEFAULT_PEOPLE = [
+  { id: 'p_me',      name: 'Me',       icon: '🧑' },
+  { id: 'p_partner', name: 'Fiancée',  icon: '💜' },
+];
 
 // Auto-category keyword map for manual entry suggestions
 const CATEGORY_KEYWORDS = {
@@ -683,9 +743,15 @@ function guessCategory(name) {
   const gasFund = funds.find(f => f.key === 'gas');
   if (gasFund && GAS_KEYWORDS.some(kw => lower.includes(kw))) return gasFund.key;
   for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some(kw => lower.includes(kw))) return cat;
+    if (data.categories[cat] && !data.categories[cat].archived && keywords.some(kw => lower.includes(kw))) return cat;
   }
-  return 'misc';
+  return fallbackCategory();
+}
+
+// 'misc' can be deleted now, so never hand back a key that isn't there.
+function fallbackCategory() {
+  if (data.categories?.misc && !data.categories.misc.archived) return 'misc';
+  return spendingKeys(data)[0] || allKeys(data)[0] || 'misc';
 }
 
 // ══════════════════════════════════════════════════
@@ -704,8 +770,10 @@ function freshData() {
     expenses: [],
     checkingBalance: 0,
     transfers: [], // { paycheckId, items: [{key, amount, checked}] }
-    bills: [],     // { id, label, amount, category, active, recurYears, recurMonths, recurWeeks, recurDays, endOfMonth, nextDueOverride, lastAppliedDate }
-    funds: [],     // { id, key, label, icon, amount, everyN, paychecksUntilNext, active, totalContributed }
+    bills: [],     // { id, label, amount, category, active, recurYears, recurMonths, recurWeeks, recurDays, endOfMonth, nextDueOverride, lastAppliedDate, paidBy }
+    funds: [],     // { id, key, label, icon, amount, everyN, paychecksUntilNext, active, totalContributed, paidBy }
+    goals: [],     // { id, key, label, icon, target, dueDate, active, paidBy }  — savings targets
+    people: [],    // { id, name, icon }  — seeded by migratePeople
   };
 }
 
@@ -736,6 +804,63 @@ function migrateData(d) {
 
   if (!d.transfers) d.transfers = [];
   migrateFunds(d);
+  migratePeople(d);
+  migrateGoals(d);
+  return d;
+}
+
+// Seeds the people list and converts every category's single `percent` into a
+// per-person map. Idempotent and purely additive — no balance is ever touched.
+function migratePeople(d) {
+  if (!Array.isArray(d.people) || !d.people.length) {
+    d.people = JSON.parse(JSON.stringify(DEFAULT_PEOPLE));
+  }
+  const firstId = d.people[0].id;
+
+  Object.keys(d.categories || {}).forEach(k => {
+    const cat = d.categories[k];
+    if (cat.order === undefined) {
+      const i = DEFAULT_ORDER.indexOf(k);
+      cat.order = i === -1 ? 50 : i;
+    }
+    if (cat.owner === undefined) cat.owner = 'shared';
+    if (cat.archived === undefined) cat.archived = false;
+    if (!cat.percents) {
+      // Everything that existed before belongs to the first person's split.
+      cat.percents = {};
+      if (!cat.isFund && !cat.isGoal) cat.percents[firstId] = Number(cat.percent) || 0;
+    }
+  });
+
+  // A person with no split at all yet starts on a copy of the main person's, so
+  // their first paycheck actually lands somewhere instead of vanishing into
+  // checking at 0%. Once any percentage is set for them this never runs again.
+  d.people.slice(1).forEach(p => {
+    const hasAny = allKeys(d).some(k => d.categories[k].percents?.[p.id] !== undefined);
+    if (hasAny) return;
+    allKeys(d).forEach(k => setCatPercent(d.categories[k], p.id, catPercent(d.categories[k], firstId)));
+  });
+
+  // Paychecks entered before this release were all the first person's.
+  (d.paychecks || []).forEach(p => { if (!p.personId) p.personId = firstId; });
+
+  // Bills and funds were set up against the first person's paycheck; keep them
+  // there so adding a second earner doesn't double-charge them.
+  (d.bills || []).forEach(b => { if (!b.paidBy) b.paidBy = firstId; });
+  (d.funds || []).forEach(f => { if (!f.paidBy) f.paidBy = firstId; });
+
+  if (!d.activePersonId || !d.people.some(p => p.id === d.activePersonId)) d.activePersonId = firstId;
+  return d;
+}
+
+function migrateGoals(d) {
+  if (!d.goals) d.goals = [];
+  d.goals.forEach(g => {
+    if (g.active === undefined) g.active = true;
+    if (!g.icon) g.icon = '🎯';
+    if (!g.paidBy) g.paidBy = primaryPersonId(d);
+  });
+  ensureGoalCategories(d);
   return d;
 }
 function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
@@ -757,21 +882,67 @@ function fmtDate(iso) {
 function todayISO() { return new Date().toISOString().split('T')[0]; }
 function uid() { return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)+Date.now(); }
 function roundCent(n) { return Math.round(n * 100) / 100; }
-function totalSavings(d) { return roundCent(SAVINGS_KEYS.reduce((s,k) => s + (d.categories[k]?.balance||0), 0)); }
+function totalSavings(d) { return roundCent(savingsKeys(d).reduce((s,k) => s + (d.categories[k]?.balance||0), 0)); }
 function totalBillReserves(d) { return roundCent((d.bills||[]).reduce((s,b) => s + (b.reserveBalance||0), 0)); }
 
-function resolvePercents(cats) {
+// ══════════════════════════════════════════════════
+//  PEOPLE
+//  Each paycheck belongs to a person, and each category holds one percentage
+//  PER PERSON, so two incomes can be split completely differently.
+// ══════════════════════════════════════════════════
+function people(d) { return (d || data).people || []; }
+function personById(id, d) { return people(d).find(p => p.id === id) || null; }
+function primaryPersonId(d) { return people(d)[0]?.id || 'p_me'; }
+function personName(id, d) { const p = personById(id, d); return p ? p.name : 'Someone'; }
+function personChip(id, d) { const p = personById(id, d); return p ? `${p.icon} ${escHtml(p.name)}` : '👥 Either'; }
+// "Me" reads badly with an apostrophe-s, so it becomes "your".
+function personPossessive(id, d) {
+  const name = personName(id, d);
+  return /^(me|myself)$/i.test(name) ? 'your' : escHtml(name) + "'s";
+}
+
+// ══════════════════════════════════════════════════
+//  CATEGORY LISTS (computed — categories are user-editable)
+//  Fund and savings-target buckets live in d.categories too, flagged isFund /
+//  isGoal, so every expense path works on them. They are never "categories".
+// ══════════════════════════════════════════════════
+function allKeys(d) {
+  const cats = (d || data).categories || {};
+  return Object.keys(cats)
+    .filter(k => cats[k] && !cats[k].isFund && !cats[k].isGoal && !cats[k].archived)
+    .sort((a, b) => (cats[a].order ?? 99) - (cats[b].order ?? 99));
+}
+function savingsKeys(d)  { const c = (d||data).categories; return allKeys(d).filter(k => c[k].type === 'savings'); }
+function spendingKeys(d) { const c = (d||data).categories; return allKeys(d).filter(k => c[k].type === 'spending'); }
+
+// A category belongs to one person or to both ('shared').
+function catVisibleTo(cat, personId) { return !cat.owner || cat.owner === 'shared' || cat.owner === personId; }
+function keysForPerson(personId, d) { const c = (d||data).categories; return allKeys(d).filter(k => catVisibleTo(c[k], personId)); }
+function catPercent(cat, personId) { return Number(cat.percents?.[personId] ?? 0); }
+function setCatPercent(cat, personId, pct) { if (!cat.percents) cat.percents = {}; cat.percents[personId] = Number(pct) || 0; }
+
+// Percentages for ONE person's paycheck, after goal-met redirects are applied.
+function resolvePercents(d, personId) {
+  const cats = d.categories;
+  const keys = allKeys(d);
   const p = {};
-  ALL_KEYS.forEach(k => p[k] = cats[k].percent);
-  ALL_KEYS.forEach(k => {
-    if (cats[k].goalMet && cats[k].redirectTo) {
-      let t = cats[k].redirectTo;
-      while (cats[t]?.goalMet && cats[t]?.redirectTo) t = cats[t].redirectTo;
-      p[t] = (p[t]||0) + p[k];
-      p[k] = 0;
+  keys.forEach(k => p[k] = catVisibleTo(cats[k], personId) ? catPercent(cats[k], personId) : 0);
+  keys.forEach(k => {
+    if (cats[k].goalMet && cats[k].redirectTo && p[k] > 0) {
+      let t = cats[k].redirectTo, guard = 0;
+      while (cats[t]?.goalMet && cats[t]?.redirectTo && guard++ < 20) t = cats[t].redirectTo;
+      if (cats[t] && catVisibleTo(cats[t], personId)) { p[t] = (p[t] || 0) + p[k]; p[k] = 0; }
     }
   });
   return p;
+}
+
+// Bills, funds and savings targets each come out of ONE person's paycheck (or
+// 'any' = whichever paycheck is entered next). Without this, a $25 gas set-aside
+// would be taken twice a week once both people enter paychecks.
+function paidByMatches(item, personId, d) {
+  const owner = item.paidBy || primaryPersonId(d);
+  return owner === 'any' || owner === personId;
 }
 
 // ══════════════════════════════════════════════════
@@ -781,12 +952,14 @@ function resolvePercents(cats) {
 //  3. Savings categories credited only when transfer checkbox is checked
 //  4. Full gross goes to checking; savings reduce checking when transferred
 // ══════════════════════════════════════════════════
-function processNewPaycheck(d, grossAmount) {
-  // Step 1: accumulate bill reserve contributions (prorated for days since last paycheck)
+function processNewPaycheck(d, grossAmount, personId) {
+  personId = personId || primaryPersonId(d);
+
+  // Step 1: accumulate bill reserve contributions (only bills this person pays)
   const days = daysSinceLastPaycheck(d);
   let billContributionsTotal = 0;
   (d.bills || []).forEach(bill => {
-    if (!bill.active) return;
+    if (!bill.active || !paidByMatches(bill, personId, d)) return;
     const contrib = billPaycheckContribution(bill, days);
     // Cap at bill.amount so we never over-reserve
     bill.reserveBalance = Math.min(bill.amount, roundCent((bill.reserveBalance || 0) + contrib));
@@ -794,15 +967,18 @@ function processNewPaycheck(d, grossAmount) {
   });
 
   // Step 1b: flat-dollar fund set-asides (gas, etc.) also come off the top
-  const fundContribs = applyFundContributions(d);
+  const fundContribs = applyFundContributions(d, personId);
 
-  // Step 2: split the remaining amount by category percentages
-  const remaining = Math.max(0, roundCent(grossAmount - billContributionsTotal - fundContribs.total));
-  const percents = resolvePercents(d.categories);
+  // Step 1c: savings targets (the $300 phone) take their slice off the top too
+  const goalContribs = applyGoalContributions(d, personId);
+
+  // Step 2: split the remaining amount by THIS person's category percentages
+  const remaining = Math.max(0, roundCent(grossAmount - billContributionsTotal - fundContribs.total - goalContribs.total));
+  const percents = resolvePercents(d, personId);
   const splits = {};
 
-  ALL_KEYS.forEach(k => {
-    const alloc = roundCent(remaining * (percents[k] / 100));
+  allKeys(d).forEach(k => {
+    const alloc = roundCent(remaining * ((percents[k] || 0) / 100));
     splits[k] = alloc;
     // Spending categories added immediately (stay in checking physically)
     if (d.categories[k].type === 'spending') {
@@ -814,11 +990,12 @@ function processNewPaycheck(d, grossAmount) {
   const celebrations = [];
 
   const pid = uid();
-  d.paychecks.unshift({ id: pid, date: todayISO(), grossAmount, splits, percents, billContributionsTotal,
-    fundContributionsTotal: fundContribs.total, fundContributions: fundContribs.items });
+  d.paychecks.unshift({ id: pid, date: todayISO(), personId, grossAmount, splits, percents, billContributionsTotal,
+    fundContributionsTotal: fundContribs.total, fundContributions: fundContribs.items,
+    goalContributionsTotal: goalContribs.total, goalContributions: goalContribs.items });
 
   // Transfer checklist (v2: toggling actually moves money between checking and savings)
-  const transferItems = SAVINGS_KEYS.map(k => ({
+  const transferItems = savingsKeys(d).filter(k => (splits[k] || 0) > 0).map(k => ({
     key: k,
     amount: splits[k],
     checked: false,
@@ -847,27 +1024,128 @@ function avgPaycheckAlloc(d, catKey, n=4) {
   return recent.reduce((s,p) => s+(p.splits[catKey]||0), 0) / recent.length;
 }
 
-// Time-based weekly savings rate — more accurate than per-paycheck average
-// because it accounts for extra cash injected between paychecks
+// ══════════════════════════════════════════════════
+//  RECENCY-WEIGHTED AVERAGE PAYCHECK
+//  A plain average buries a raise under years of old paychecks. This walks the
+//  paychecks oldest → newest and pulls the running average toward each one, but
+//  ASYMMETRICALLY: a bigger paycheck pulls hard (a raise is a new normal), a
+//  smaller one only nudges (a short week is noise). So after 2–3 checks at a new
+//  rate the average sits at the new rate, while one light week barely moves it.
+//  Side effect worth knowing: with lots of up-and-down weeks this reads slightly
+//  high, which makes goal ETAs slightly optimistic.
+// ══════════════════════════════════════════════════
+const AVG_PULL_UP = 0.45;   // a raise moves the average 45% of the way, each time
+const AVG_PULL_DOWN = 0.18; // a light week moves it only 18%
+
+function weightedAvgPaycheck(d, personId) {
+  let list = (d.paychecks || []).filter(p => p.grossAmount > 0);
+  if (personId) list = list.filter(p => (p.personId || primaryPersonId(d)) === personId);
+  if (!list.length) return 0;
+  // d.paychecks is newest-first; walk it oldest-first.
+  const chron = list.slice().reverse();
+  let avg = chron[0].grossAmount;
+  for (let i = 1; i < chron.length; i++) {
+    const v = chron[i].grossAmount;
+    const alpha = v > avg ? AVG_PULL_UP : AVG_PULL_DOWN;
+    avg = avg + alpha * (v - avg);
+  }
+  return roundCent(avg);
+}
+
+// Everyone's weighted paycheck added together — the household's weekly income.
+function weightedAvgHousehold(d) {
+  const ids = people(d).map(p => p.id);
+  if (!ids.length) return weightedAvgPaycheck(d, null);
+  return roundCent(ids.reduce((s, id) => s + weightedAvgPaycheck(d, id), 0));
+}
+
+// Forward-looking weekly rate into one category: each person's weighted paycheck
+// times the share they send there. Used for "weeks to go" estimates, so a raise
+// shortens the ETA right away instead of after months of history.
 function weeklyAllocRate(d, catKey) {
-  const paychecks = d.paychecks;
-  if (!paychecks.length) return 0;
-  if (paychecks.length === 1) return paychecks[0].splits[catKey] || 0;
+  const cat = d.categories[catKey];
+  if (!cat) return 0;
+  const ids = people(d).map(p => p.id);
+  if (!ids.length) return 0;
+  let rate = 0;
+  ids.forEach(id => {
+    const avg = weightedAvgPaycheck(d, id);
+    if (avg <= 0) return;
+    const pct = resolvePercents(d, id)[catKey] || 0;
+    rate += avg * (pct / 100);
+  });
+  return roundCent(rate);
+}
 
-  // Use up to 52 weeks of history
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 365);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
-  const relevant = paychecks.filter(p => p.date >= cutoffStr);
-  const pool = relevant.length >= 2 ? relevant : paychecks.slice(0, Math.min(paychecks.length, 8));
+// ══════════════════════════════════════════════════
+//  SAVINGS TARGETS  ("$300 phone by next month")
+//  A one-off goal with an amount and a deadline. Each paycheck sets aside
+//  remaining ÷ paychecks-left, exactly like a bill's sinking fund, so the math
+//  self-corrects if a paycheck is missed. The money is earmarked inside
+//  checking, so it never shows up as spendable.
+// ══════════════════════════════════════════════════
+function ensureGoalCategories(d) {
+  (d.goals || []).forEach(g => {
+    const existing = d.categories[g.key];
+    if (existing) {
+      existing.label = g.label; existing.icon = g.icon;
+      existing.isGoal = true; existing.goalId = g.id; existing.type = 'spending';
+      return;
+    }
+    d.categories[g.key] = {
+      label: g.label, balance: 0, goal: null, percents: {}, goalMet: false,
+      redirectTo: null, icon: g.icon, type: 'spending', isGoal: true, goalId: g.id,
+    };
+  });
+}
 
-  const totalAlloc = pool.reduce((s, p) => s + (p.splits[catKey] || 0), 0);
-  if (pool.length === 1) return totalAlloc;
+function activeGoals(d) { return ((d || data).goals || []).filter(g => g.active); }
+function goalBal(d, g)  { return roundCent(d.categories[g.key]?.balance || 0); }
+function addToGoal(d, g, amt) {
+  if (!d.categories[g.key]) ensureGoalCategories(d);
+  d.categories[g.key].balance = roundCent((d.categories[g.key].balance || 0) + amt);
+}
+function goalRemaining(d, g) { return Math.max(0, roundCent(g.target - goalBal(d, g))); }
+function goalReady(d, g) { return goalBal(d, g) >= g.target - 0.005; }
+function totalGoalReserves(d) {
+  return roundCent(activeGoals(d).reduce((s, g) => s + Math.max(0, goalBal(d, g)), 0));
+}
+// Paychecks left before the deadline (at least 1, so a due-today goal asks for
+// the whole remainder rather than dividing by zero).
+function goalPaychecksLeft(d, g) {
+  return fridaysUntilDate(new Date(g.dueDate + 'T00:00:00'));
+}
+function goalPerPaycheck(d, g) {
+  const remaining = goalRemaining(d, g);
+  if (remaining <= 0) return 0;
+  return roundCent(remaining / goalPaychecksLeft(d, g));
+}
+function goalDaysLeft(d, g) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = new Date(g.dueDate + 'T00:00:00');
+  return Math.round((due - today) / 86400000);
+}
 
-  const times = pool.map(p => new Date(p.date + 'T12:00:00').getTime());
-  const daysDiff = (Math.max(...times) - Math.min(...times)) / 86400000;
-  if (daysDiff < 3) return totalAlloc; // All same-day — count as one week
-  return totalAlloc / (daysDiff / 7);
+function applyGoalContributions(d, personId) {
+  const items = [];
+  let total = 0;
+  activeGoals(d).forEach(g => {
+    if (!paidByMatches(g, personId, d)) return;
+    const contrib = Math.min(goalPerPaycheck(d, g), goalRemaining(d, g));
+    if (contrib <= 0) return;
+    addToGoal(d, g, contrib);
+    items.push({ goalId: g.id, key: g.key, amount: roundCent(contrib) });
+    total = roundCent(total + contrib);
+  });
+  return { total, items };
+}
+
+function reverseGoalContributions(d, paycheck) {
+  (paycheck.goalContributions || []).forEach(it => {
+    const g = (d.goals || []).find(x => x.id === it.goalId);
+    if (!g) return;
+    addToGoal(d, g, -it.amount);
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -1185,10 +1463,13 @@ function fundSpentThisMonth(d, f) {
 
 // Runs once per real paycheck: each active fund either contributes its fixed
 // amount (and restarts its countdown) or ticks one paycheck closer to its turn.
-function applyFundContributions(d) {
+function applyFundContributions(d, personId) {
   const items = [];
   let total = 0;
   activeFunds(d).forEach(f => {
+    // Only tick down / contribute on the paycheck this bucket is paid from,
+    // otherwise two earners would fund it twice a week.
+    if (personId && !paidByMatches(f, personId, d)) return;
     const everyN = Math.max(1, f.everyN || 1);
     if ((f.paychecksUntilNext || 0) > 0) { f.paychecksUntilNext--; return; }
     const amt = roundCent(f.amount || 0);
@@ -1216,7 +1497,9 @@ function reverseFundContributions(d, paycheck, isLatest) {
   });
   if (!isLatest) return;
   // Funds that merely ticked down on this paycheck tick back up.
+  const payer = paycheck.personId || primaryPersonId(d);
   activeFunds(d).forEach(f => {
+    if (!paidByMatches(f, payer, d)) return;
     if (items.some(it => it.fundId === f.id)) return;
     const everyN = Math.max(1, f.everyN || 1);
     f.paychecksUntilNext = Math.min(everyN - 1, (f.paychecksUntilNext || 0) + 1);
@@ -1240,6 +1523,7 @@ function renderAll() {
   renderSettings();
   renderBills();
   renderFunds();
+  renderGoalTargets();
   if (activeTab === 4) renderAnalytics();
 }
 
@@ -1248,8 +1532,8 @@ function renderHeader() {
   const el = document.getElementById('header-balance');
   el.textContent = fmt(savings);
   el.className = savings < 0 ? 'negative' : '';
-  // Header shows spendable checking (total minus bill reserves)
-  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data));
+  // Header shows spendable checking (minus bill reserves and savings targets)
+  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data) - totalGoalReserves(data));
   document.getElementById('header-checking-amt').textContent = fmt(spendable);
 }
 
@@ -1265,19 +1549,21 @@ function renderDashboard() {
   // Checking
   const checkingTotal = data.checkingBalance || 0;
   const billReserve = totalBillReserves(data);
-  const available = roundCent(checkingTotal - billReserve);
+  const goalReserve = totalGoalReserves(data);
+  const available = roundCent(checkingTotal - billReserve - goalReserve);
   const transferred = getTransferredAmount();
   document.getElementById('dash-checking').textContent = fmt(checkingTotal);
 
-  // Build the meta line: reserve + available + savings-transferred info
+  // Build the meta line: reserve + targets + available + savings-transferred info
   const metaParts = [];
   if (billReserve > 0) metaParts.push(`💸 ${fmt(billReserve)} reserved for bills`);
+  if (goalReserve > 0) metaParts.push(`🎯 ${fmt(goalReserve)} saved for targets`);
   metaParts.push(`${fmt(available)} available to spend`);
   if (transferred > 0) metaParts.push(`${fmt(transferred)} moved to savings`);
   document.getElementById('dash-checking-meta').textContent = metaParts.join(' · ');
 
   // Savings grid (locked)
-  document.getElementById('dash-savings').innerHTML = SAVINGS_KEYS.map(k => {
+  document.getElementById('dash-savings').innerHTML = savingsKeys().map(k => {
     const cat = data.categories[k];
     const bal = cat.balance;
     const pct = cat.goal ? Math.min(100, Math.round((bal/cat.goal)*100)) : 100;
@@ -1292,7 +1578,7 @@ function renderDashboard() {
   }).join('');
 
   // Spending grid — percentage buckets first, then flat-amount buckets (gas)
-  const pctCards = SPENDING_KEYS.map(k => {
+  const pctCards = spendingKeys().map(k => {
     const cat = data.categories[k];
     const bal = cat.balance;
     const isNeg = bal < 0;
@@ -1313,7 +1599,7 @@ function renderDashboard() {
   document.getElementById('dash-spending').innerHTML = pctCards.concat(flatCards).join('');
 
   // Spending total
-  const spendTotal = roundCent(SPENDING_KEYS.reduce((s,k) => s + (data.categories[k]?.balance||0), 0) + totalFundBalances(data));
+  const spendTotal = roundCent(spendingKeys().reduce((s,k) => s + (data.categories[k]?.balance||0), 0) + totalFundBalances(data));
   const stEl = document.getElementById('spending-total');
   stEl.textContent = fmt(spendTotal);
   stEl.style.color = spendTotal < 0 ? 'var(--danger)' : 'var(--success)';
@@ -1383,22 +1669,28 @@ function renderPaychecks() {
   const bContent = document.getElementById('paycheck-breakdown-content');
   if (lastP) {
     bCard.style.display = '';
-    const rows = ALL_KEYS.map(k => {
+    // Only rows this paycheck actually fed (a person's split skips the other's buckets)
+    const rows = allKeys().filter(k => (lastP.percents[k]||0) > 0 || (lastP.splits[k]||0) !== 0).map(k => {
       const cat = data.categories[k];
       return `<tr>
-        <td>${cat.icon} ${cat.label}</td>
+        <td>${cat.icon} ${escHtml(cat.label)}</td>
         <td>${lastP.percents[k]||0}%</td>
         <td>${fmt(lastP.splits[k]||0)}</td>
       </tr>`;
     }).join('');
     const billContribTotal = roundCent(lastP.billContributionsTotal || 0);
     const fundContribTotal = roundCent(lastP.fundContributionsTotal || 0);
-    const remainingAfterBills = roundCent(lastP.grossAmount - billContribTotal - fundContribTotal);
+    const goalContribTotal = roundCent(lastP.goalContributionsTotal || 0);
+    const remainingAfterBills = roundCent(lastP.grossAmount - billContribTotal - fundContribTotal - goalContribTotal);
     const billContribLine = `<tr>
       <td style="color:var(--warning)">💸 Bill Reserves</td>
       <td></td>
       <td style="color:var(--warning)">${billContribTotal > 0 ? '-' : ''}${fmt(billContribTotal)}</td>
-    </tr>` + (lastP.fundContributions || []).map(fc => `<tr>
+    </tr>` + (lastP.goalContributions || []).map(gc => `<tr>
+      <td style="color:var(--warning)">${data.categories[gc.key]?.icon || '🎯'} ${escHtml(data.categories[gc.key]?.label || 'Target')}</td>
+      <td></td>
+      <td style="color:var(--warning)">-${fmt(gc.amount)}</td>
+    </tr>`).join('') + (lastP.fundContributions || []).map(fc => `<tr>
       <td style="color:var(--warning)">${data.categories[fc.key]?.icon || '💰'} ${escHtml(data.categories[fc.key]?.label || 'Bucket')}</td>
       <td></td>
       <td style="color:var(--warning)">-${fmt(fc.amount)}</td>
@@ -1406,7 +1698,7 @@ function renderPaychecks() {
     bContent.innerHTML = `
       <div style="margin-bottom:12px">
         <div style="font-size:20px;font-weight:800">${fmt(lastP.grossAmount)}</div>
-        <div class="text-sm text-muted">${fmtDate(lastP.date)}</div>
+        <div class="text-sm text-muted">${fmtDate(lastP.date)}${people(data).length>1 ? ' · ' + personChip(lastP.personId || primaryPersonId(data)) : ''}</div>
         <div class="text-xs text-muted" style="margin-top:4px">${fmt(remainingAfterBills)} split by % after bill reserves &amp; flat buckets</div>
       </div>
       <table class="split-table">${billContribLine}${rows}</table>`;
@@ -1420,6 +1712,7 @@ function renderPaychecks() {
   hist.innerHTML = data.paychecks.map((p,i) => `<li class="paycheck-item">
     <div>
       <div style="font-size:13px;font-weight:700">${fmtDate(p.date)}</div>
+      ${people(data).length>1 ? `<div style="font-size:11px;color:var(--text-muted)">${personChip(p.personId || primaryPersonId(data))}</div>` : ''}
       ${i===0?'<div style="font-size:11px;color:var(--accent)">CURRENT</div>':''}
     </div>
     <div style="display:flex;align-items:center;gap:10px">
@@ -1431,7 +1724,7 @@ function renderPaychecks() {
 
 // ── Goals ───────────────────────────────────────────────
 function renderGoals() {
-  document.getElementById('goals-list').innerHTML = SAVINGS_KEYS.map(k => {
+  document.getElementById('goals-list').innerHTML = savingsKeys().map(k => {
     const cat = data.categories[k];
     const bal = Math.max(0, cat.balance);
     const pct = cat.goal ? Math.min(100, Math.round((bal/cat.goal)*100)) : 100;
@@ -1450,11 +1743,11 @@ function renderGoals() {
       ${remaining>0
         ? `<div class="goal-eta">${fmt(remaining)} to go${eta?` · ~${eta} weeks at current rate`:''}</div>`
         : '<div class="goal-eta text-success">You reached this goal! 🎉</div>'}
-      ${cat.goalMet && cat.redirectTo ? `<div class="goal-eta" style="margin-top:4px">Your ${cat.percent}% now flows to ${data.categories[cat.redirectTo].label}</div>` : ''}
+      ${cat.goalMet && cat.redirectTo && data.categories[cat.redirectTo] ? `<div class="goal-eta" style="margin-top:4px">That share now flows to ${escHtml(data.categories[cat.redirectTo].label)}</div>` : ''}
     </div>`;
   }).join('');
 
-  const pctBudgets = SPENDING_KEYS.map(k => {
+  const pctBudgets = spendingKeys().map(k => {
     const cat = data.categories[k];
     const lastP = data.paychecks[0];
     const weekly = lastP ? (lastP.splits[k]||0) : 0;
@@ -1463,7 +1756,7 @@ function renderGoals() {
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:15px;font-weight:700">${cat.icon} ${cat.label}</div>
-          <div class="text-sm text-muted">${cat.percent}% · ${weekly?fmt(weekly)+' added last paycheck':'no paycheck yet'}</div>
+          <div class="text-sm text-muted">${pctLabel(cat)} · ${weekly?fmt(weekly)+' added last paycheck':'no paycheck yet'}</div>
         </div>
         <div style="font-size:22px;font-weight:800;color:${isNeg?'var(--danger)':'var(--success)'}">${fmt(cat.balance)}</div>
       </div>
@@ -1580,6 +1873,72 @@ function renderFunds() {
   </div>`).join('');
 }
 
+// "25%" with one earner, "🧑25% · 💜10%" with two.
+function pctLabel(cat) {
+  const ppl = people(data);
+  if (ppl.length <= 1) return `${catPercent(cat, ppl[0]?.id || primaryPersonId(data))}%`;
+  return ppl.filter(p => catVisibleTo(cat, p.id)).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
+}
+
+// ── Savings targets ─────────────────────────────────────
+function goalCardHTML(g) {
+  const bal = goalBal(data, g);
+  const pct = Math.min(100, Math.round((bal / g.target) * 100));
+  const ready = goalReady(data, g);
+  const days = goalDaysLeft(data, g);
+  const left = goalPaychecksLeft(data, g);
+  const per = goalPerPaycheck(data, g);
+  const when = days < 0 ? 'past the date' : days === 0 ? 'today' : `${days}d away`;
+  return `<div class="bill-fund-item" onclick="openEditGoal('${g.id}')">
+    <div class="bill-fund-header">
+      <div class="bill-fund-name">${g.icon} ${escHtml(g.label)}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${fmtDate(g.dueDate)} · ${when}</div>
+    </div>
+    <div class="bill-fund-amounts">
+      <strong>${fmt(bal)}</strong> saved of <strong>${fmt(g.target)}</strong>
+    </div>
+    <div class="progress-bar" style="margin-bottom:5px">
+      <div class="progress-fill${ready?' done':''}" style="width:${pct}%${ready?'':';background:var(--accent)'}"></div>
+    </div>
+    <div class="bill-fund-meta">
+      ${ready
+        ? `<span style="color:var(--success)">Ready — tap to mark it bought 🎉</span>`
+        : `<span>${left} paycheck${left===1?'':'s'} left · ~${fmt(per)} out of each</span>`}
+    </div>
+    <div class="bill-fund-meta">Comes out of ${g.paidBy === 'any' ? 'whichever paycheck is next' : personPossessive(g.paidBy) + ' paycheck'}</div>
+  </div>`;
+}
+
+function renderGoalTargets() {
+  const goals = activeGoals(data);
+  const dashEl = document.getElementById('dash-goals');
+  if (dashEl) {
+    dashEl.innerHTML = goals.length
+      ? goals.map(goalCardHTML).join('')
+      : '<div class="empty-state" style="padding:16px 0">No targets yet — add one for something you want by a certain date</div>';
+  }
+  const tabEl = document.getElementById('goals-targets');
+  if (tabEl) {
+    tabEl.innerHTML = goals.length
+      ? `<div class="card" style="padding:0 16px">${goals.map(goalCardHTML).join('')}</div>`
+      : '<div class="card"><div class="empty-state">Nothing being saved for right now</div></div>';
+  }
+  const setEl = document.getElementById('settings-goals');
+  if (setEl) {
+    const all = data.goals || [];
+    setEl.innerHTML = all.length ? all.map(g => {
+      const bal = goalBal(data, g);
+      return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
+        <div class="sr-label" style="flex:1;min-width:0">
+          <div style="font-weight:700">${g.icon} ${escHtml(g.label)}${g.active?'':' <span class="text-xs text-muted">(done)</span>'}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${fmt(bal)} of ${fmt(g.target)} · by ${fmtDate(g.dueDate)}</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="openEditGoal('${g.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
+      </div>`;
+    }).join('') : '<div class="empty-state">No savings targets yet</div>';
+  }
+}
+
 // ── Settings ────────────────────────────────────────────
 function renderSettings() {
   // API key
@@ -1592,22 +1951,87 @@ function renderSettings() {
   // Checking
   document.getElementById('settings-checking').value = (data.checkingBalance||0).toFixed(2);
 
-  // Percentages
-  document.getElementById('settings-pcts').innerHTML = ALL_KEYS.map(k => {
-    const cat = data.categories[k];
-    return `<div class="settings-row">
-      <div class="sr-label">${cat.icon} ${cat.label}</div>
-      <input class="sr-pct-input" type="number" min="0" max="100" step="1" value="${cat.percent}" data-key="${k}" oninput="updatePctTotal()">
-    </div>`;
-  }).join('');
-  updatePctTotal();
+  // People
+  renderPeopleSettings();
+
+  // Per-person paycheck split
+  renderPctSettings();
+
+  // Category management
+  renderCategorySettings();
 
   // Savings balances only
-  document.getElementById('settings-balances').innerHTML = SAVINGS_KEYS.map(k => {
+  document.getElementById('settings-balances').innerHTML = savingsKeys(data).map(k => {
     const cat = data.categories[k];
     return `<div class="settings-row">
-      <div class="sr-label">${cat.icon} ${cat.label}</div>
+      <div class="sr-label">${cat.icon} ${escHtml(cat.label)}</div>
       <input class="sr-bal-input" type="number" step="0.01" value="${cat.balance.toFixed(2)}" data-key="${k}">
+    </div>`;
+  }).join('');
+}
+
+// Which person's split the Settings percentage editor is showing.
+let settingsPersonId = null;
+
+function settingsPerson() {
+  const ppl = people(data);
+  if (!settingsPersonId || !ppl.some(p => p.id === settingsPersonId)) settingsPersonId = primaryPersonId(data);
+  return settingsPersonId;
+}
+
+function selectSettingsPerson(id) {
+  settingsPersonId = id;
+  renderPctSettings();
+}
+
+function renderPeopleSettings() {
+  const el = document.getElementById('settings-people');
+  if (!el) return;
+  el.innerHTML = people(data).map((p, i) => `<div class="settings-row">
+    <div class="sr-label">${p.icon} ${escHtml(p.name)}${i===0?' <span class="text-xs text-muted">(main)</span>':''}</div>
+    <button class="btn btn-secondary btn-sm" onclick="openEditPerson('${p.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
+  </div>`).join('') || '<div class="empty-state">No one added yet</div>';
+}
+
+function renderPctSettings() {
+  const el = document.getElementById('settings-pcts');
+  if (!el) return;
+  const pid = settingsPerson();
+  const ppl = people(data);
+
+  const picker = ppl.length > 1 ? `<div class="person-pick-row" style="margin-bottom:12px">
+    ${ppl.map(p => `<button class="person-pick${p.id===pid?' active':''}" onclick="selectSettingsPerson('${p.id}')">${p.icon} ${escHtml(p.name)}</button>`).join('')}
+  </div>` : '';
+
+  const keys = keysForPerson(pid, data);
+  const rows = keys.map(k => {
+    const cat = data.categories[k];
+    const ownerTag = cat.owner && cat.owner !== 'shared' ? ` <span class="text-xs text-muted">${personChip(cat.owner)}</span>` : '';
+    return `<div class="settings-row">
+      <div class="sr-label">${cat.icon} ${escHtml(cat.label)}${ownerTag}</div>
+      <input class="sr-pct-input" type="number" min="0" max="100" step="1" value="${catPercent(cat, pid)}" data-key="${k}" oninput="updatePctTotal()">
+    </div>`;
+  }).join('');
+
+  el.innerHTML = picker + (rows || '<div class="empty-state">No categories for this person yet</div>');
+  updatePctTotal();
+}
+
+function renderCategorySettings() {
+  const el = document.getElementById('settings-categories');
+  if (!el) return;
+  const keys = allKeys(data);
+  if (!keys.length) { el.innerHTML = '<div class="empty-state">No categories yet</div>'; return; }
+  el.innerHTML = keys.map(k => {
+    const cat = data.categories[k];
+    const who = !cat.owner || cat.owner === 'shared' ? '👥 Both' : personChip(cat.owner);
+    const pcts = people(data).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
+    return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
+      <div class="sr-label" style="flex:1;min-width:0">
+        <div style="font-weight:700">${cat.icon} ${escHtml(cat.label)}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${cat.type === 'savings' ? '🔒 Savings' : 'Spending'} · ${who} · ${pcts}</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="openEditCategory('${k}')" style="padding:6px 10px;font-size:13px">Edit</button>
     </div>`;
   }).join('');
 }
@@ -1642,7 +2066,7 @@ function handleModalBg(e) { if (e.target===document.getElementById('modal-overla
 // fund (deleted fund with history) is still included when it's the current
 // selection, so editing an old purchase can't silently re-categorize it.
 function catOptions(selectedKey) {
-  const keys = ALL_KEYS.concat(activeFunds(data).map(f => f.key));
+  const keys = allKeys().concat(activeFunds(data).map(f => f.key));
   if (selectedKey && !keys.includes(selectedKey) && data.categories[selectedKey]) keys.push(selectedKey);
   return keys.map(k => {
     const c = data.categories[k];
@@ -1651,9 +2075,35 @@ function catOptions(selectedKey) {
 }
 
 // ── Paycheck modal ─────────────────────────────────────
+// Which person the paycheck modal currently has selected.
+let paycheckPersonId = null;
+
+function selectPaycheckPerson(id) {
+  paycheckPersonId = id;
+  document.querySelectorAll('.person-pick').forEach(b => {
+    b.className = 'person-pick' + (b.dataset.person === id ? ' active' : '');
+  });
+  const note = document.getElementById('paycheck-person-note');
+  if (note) note.textContent = `Splits by ${personPossessive(id)} percentages`;
+}
+
 function openPaycheckModal() {
+  const ppl = people(data);
+  paycheckPersonId = data.activePersonId && ppl.some(p => p.id === data.activePersonId)
+    ? data.activePersonId : primaryPersonId(data);
+
+  const personPicker = ppl.length > 1 ? `
+    <div class="form-group">
+      <label class="form-label">Whose Paycheck?</label>
+      <div class="person-pick-row">
+        ${ppl.map(p => `<button class="person-pick${p.id===paycheckPersonId?' active':''}" data-person="${p.id}" onclick="selectPaycheckPerson('${p.id}')">${p.icon} ${escHtml(p.name)}</button>`).join('')}
+      </div>
+      <div class="text-xs text-muted mt-8" id="paycheck-person-note">Splits by ${personPossessive(paycheckPersonId)} percentages</div>
+    </div>` : '';
+
   document.getElementById('modal-title').textContent = 'Enter Paycheck Amount';
   document.getElementById('modal-body').innerHTML = `
+    ${personPicker}
     <div class="form-group">
       <label class="form-label">Gross Amount This Week</label>
       <div class="input-wrap">
@@ -1675,21 +2125,23 @@ function openPaycheckModal() {
 function submitPaycheck(mode) {
   const gross = parseFloat(document.getElementById('modal-paycheck-amt')?.value);
   if (!gross || gross <= 0) { alert('Enter a valid amount'); return; }
+  const personId = paycheckPersonId || primaryPersonId(data);
+  data.activePersonId = personId;
 
   if (mode === 'nobalances') {
     // "Already Deposited" — money is already in bank. Only credit spending categories.
     // No bill reserve contributions, no checking change, no savings change.
-    const percents = resolvePercents(data.categories);
+    const percents = resolvePercents(data, personId);
     const splits = {};
-    ALL_KEYS.forEach(k => {
-      const alloc = roundCent(gross * (percents[k] / 100));
+    allKeys(data).forEach(k => {
+      const alloc = roundCent(gross * ((percents[k] || 0) / 100));
       splits[k] = alloc;
       if (data.categories[k].type === 'spending') {
         data.categories[k].balance = roundCent((data.categories[k].balance || 0) + alloc);
       }
     });
     const pid = uid();
-    data.paychecks.unshift({ id: pid, date: todayISO(), grossAmount: gross, splits, percents, mode: 'nobalances' });
+    data.paychecks.unshift({ id: pid, date: todayISO(), personId, grossAmount: gross, splits, percents, mode: 'nobalances' });
     saveData(data);
     hideModal();
     renderAll();
@@ -1698,7 +2150,7 @@ function submitPaycheck(mode) {
   }
 
   // 'full' — normal full paycheck with bill contributions + transfer checklist
-  const result = processNewPaycheck(data, gross);
+  const result = processNewPaycheck(data, gross, personId);
   data = result.d;
   saveData(data);
   hideModal();
@@ -1763,7 +2215,7 @@ function openDeletePaycheck(paycheckId) {
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px">What will be reversed:</div>
     <ul style="font-size:13px;color:var(--text-muted);padding-left:18px;margin-bottom:16px;line-height:2">
       ${!isNoBalances ? `<li>Checking −${fmt(p.grossAmount)} (paycheck deposit undone)</li>` : ''}
-      ${SPENDING_KEYS.map(k => p.splits[k] > 0 ? `<li>${data.categories[k].icon} ${data.categories[k].label} −${fmt(p.splits[k]||0)}</li>` : '').join('')}
+      ${spendingKeys().map(k => p.splits[k] > 0 ? `<li>${data.categories[k].icon} ${data.categories[k].label} −${fmt(p.splits[k]||0)}</li>` : '').join('')}
       ${checkedTotal > 0 ? checkedTransfers.map(t => `<li>${data.categories[t.key]?.icon||''} ${data.categories[t.key]?.label||t.key} savings −${fmt(t.amount)} (transfer was checked)</li>`).join('') : '<li>No savings transfers to reverse (none were checked)</li>'}
       ${p.billContributionsTotal > 0 ? `<li>💸 Bill reserves −${fmt(p.billContributionsTotal)} (redistributed to bills)</li>` : ''}
       ${(p.fundContributions||[]).map(fc => `<li>${data.categories[fc.key]?.icon||'💰'} ${escHtml(data.categories[fc.key]?.label||'Bucket')} −${fmt(fc.amount)} (flat set-aside)</li>`).join('')}
@@ -1785,7 +2237,7 @@ function deletePaycheck(paycheckId) {
   const transfer = transferIdx !== -1 ? data.transfers[transferIdx] : null;
 
   // 1. Reverse spending category balances (always, both modes)
-  SPENDING_KEYS.forEach(k => {
+  spendingKeys().forEach(k => {
     if (p.splits[k]) {
       data.categories[k].balance = roundCent((data.categories[k].balance||0) - (p.splits[k]||0));
     }
@@ -1804,7 +2256,7 @@ function deletePaycheck(paycheckId) {
       });
     } else if (transfer && !transfer.v2) {
       // Old v1 transfers: splits were credited immediately at paycheck time
-      SAVINGS_KEYS.forEach(k => {
+      savingsKeys().forEach(k => {
         if (p.splits[k]) {
           data.categories[k].balance = roundCent((data.categories[k].balance||0) - (p.splits[k]||0));
           const cat = data.categories[k];
@@ -1818,6 +2270,9 @@ function deletePaycheck(paycheckId) {
 
     // 4a. Reverse fund set-asides using the exact amounts recorded on the paycheck
     reverseFundContributions(data, p, idx === 0);
+
+    // 4a2. Reverse savings-target set-asides (exact amounts too)
+    reverseGoalContributions(data, p);
 
     // 4b. Reverse bill reserves proportionally
     const billContribTotal = p.billContributionsTotal || 0;
@@ -1956,29 +2411,38 @@ function deleteExpense(idx) {
 }
 
 // ── Adjust checking ─────────────────────────────────────
-function openAdjustChecking(dir) {
-  const label = dir > 0 ? 'Deposit to Checking' : 'Withdraw from Checking';
-  document.getElementById('modal-title').textContent = label;
+// Deposit / withdraw. Both directions pick ONE account, and what happens to
+// checking follows the account's type — the same rule purchases already use:
+//   • Checking only            → checking moves
+//   • Spending bucket / gas /  → checking moves AND the envelope moves
+//     savings target              (that money physically sits in checking)
+//   • Savings goal             → ONLY the savings balance moves; checking is
+//                                untouched, because savings live in a different
+//                                account in real life.
+function adjustAccountOptions() {
+  const spend = spendingKeys(data);
+  const save  = savingsKeys(data);
+  const funds = activeFunds(data);
+  const goals = activeGoals(data);
+  return `
+    <option value="">💳 Checking only</option>
+    ${spend.length ? `<optgroup label="Spending Buckets">
+      ${spend.map(k => `<option value="${k}">${data.categories[k].icon} ${escHtml(data.categories[k].label)}</option>`).join('')}
+    </optgroup>` : ''}
+    ${funds.length ? `<optgroup label="Flat-Amount Buckets">
+      ${funds.map(f => `<option value="${f.key}">${f.icon} ${escHtml(f.label)}</option>`).join('')}
+    </optgroup>` : ''}
+    ${goals.length ? `<optgroup label="Savings Targets">
+      ${goals.map(g => `<option value="${g.key}">${g.icon} ${escHtml(g.label)}</option>`).join('')}
+    </optgroup>` : ''}
+    ${save.length ? `<optgroup label="Savings Goals (separate account)">
+      ${save.map(k => `<option value="${k}">${data.categories[k].icon} ${escHtml(data.categories[k].label)}</option>`).join('')}
+    </optgroup>` : ''}`;
+}
 
-  const catSection = dir > 0 ? `
-    <div class="form-group">
-      <label class="form-label">Also Add to Category? <span style="font-size:11px;color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-      <div class="text-xs text-muted" style="margin-bottom:8px">Pick a category to credit the same amount — useful for depositing extra cash directly into a spending bucket or savings goal.</div>
-      <div class="form-select-wrap">
-        <select class="form-select" id="chk-category">
-          <option value="">None — checking only</option>
-          <optgroup label="Spending Buckets">
-            ${SPENDING_KEYS.map(k => `<option value="${k}">${data.categories[k].icon} ${data.categories[k].label}</option>`).join('')}
-          </optgroup>
-          <optgroup label="Savings Goals">
-            ${SAVINGS_KEYS.map(k => `<option value="${k}">${data.categories[k].icon} ${data.categories[k].label}</option>`).join('')}
-          </optgroup>
-          ${activeFunds(data).length ? `<optgroup label="Flat-Amount Buckets">
-            ${activeFunds(data).map(f => `<option value="${f.key}">${f.icon} ${escHtml(f.label)}</option>`).join('')}
-          </optgroup>` : ''}
-        </select>
-      </div>
-    </div>` : '';
+function openAdjustChecking(dir) {
+  const isDeposit = dir > 0;
+  document.getElementById('modal-title').textContent = isDeposit ? 'Deposit Money' : 'Withdraw Money';
 
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
@@ -1988,42 +2452,68 @@ function openAdjustChecking(dir) {
         <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="chk-amount">
       </div>
     </div>
-    ${catSection}
+    <div class="form-group">
+      <label class="form-label">${isDeposit ? 'Deposit Into' : 'Take It Out Of'}</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="chk-category" onchange="updateAdjustHint(${dir})">${adjustAccountOptions()}</select>
+      </div>
+      <div class="text-xs text-muted mt-8" id="chk-hint"></div>
+    </div>
     <div class="form-group">
       <label class="form-label">Note (optional)</label>
-      <input class="form-input" type="text" placeholder="e.g. ATM deposit..." id="chk-note" maxlength="60">
+      <input class="form-input" type="text" placeholder="${isDeposit ? 'e.g. birthday money...' : 'e.g. cash for gas...'}" id="chk-note" maxlength="60">
     </div>
     <button class="btn btn-primary" onclick="submitCheckingAdj(${dir})">Confirm</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
+  updateAdjustHint(dir);
+  setTimeout(() => { const i = document.getElementById('chk-amount'); if(i) i.focus(); }, 100);
+}
+
+// Spells out exactly which balances will move, so a deposit into savings can
+// never look like it silently touched checking.
+function updateAdjustHint(dir) {
+  const el = document.getElementById('chk-hint');
+  if (!el) return;
+  const key = document.getElementById('chk-category')?.value;
+  const verb = dir > 0 ? 'added to' : 'taken out of';
+  if (!key) { el.textContent = `Only your checking balance changes.`; return; }
+  const cat = data.categories[key];
+  if (!cat) { el.textContent = ''; return; }
+  el.textContent = cat.type === 'savings'
+    ? `Only ${cat.label} changes — your checking balance stays exactly where it is.`
+    : `${cat.label} and your checking balance both change (this money sits in checking).`;
 }
 
 function submitCheckingAdj(dir) {
   const amt = parseFloat(document.getElementById('chk-amount')?.value);
   if (!amt || amt <= 0) { alert('Enter a valid amount'); return; }
-  data.checkingBalance = roundCent((data.checkingBalance||0) + dir * amt);
+  const key = document.getElementById('chk-category')?.value;
+  const note = document.getElementById('chk-note')?.value.trim() || '';
+  const cat = key ? data.categories[key] : null;
 
-  // If a category was selected for a deposit, credit it too
-  if (dir > 0) {
-    const catKey = document.getElementById('chk-category')?.value;
-    if (catKey && data.categories[catKey]) {
-      data.categories[catKey].balance = roundCent((data.categories[catKey].balance||0) + amt);
-      // Check if savings goal was just reached
-      const cat = data.categories[catKey];
-      if (cat.goal !== null && !cat.goalMet && cat.balance >= cat.goal) {
-        cat.goalMet = true;
-        saveData(data);
-        hideModal();
-        renderAll();
-        showCelebrations([{ label: cat.label, goal: cat.goal, redirectLabel: cat.redirectTo ? data.categories[cat.redirectTo]?.label : null }], 0);
-        return;
-      }
+  // Savings balances live outside checking; everything else lives inside it.
+  const touchesChecking = !cat || cat.type !== 'savings';
+  if (touchesChecking) data.checkingBalance = roundCent((data.checkingBalance||0) + dir * amt);
+  if (cat) cat.balance = roundCent((cat.balance||0) + dir * amt);
+
+  let celebration = null;
+  if (cat && cat.goal !== null && cat.goal !== undefined) {
+    if (!cat.goalMet && cat.balance >= cat.goal) {
+      cat.goalMet = true;
+      celebration = { label: cat.label, goal: cat.goal, redirectLabel: cat.redirectTo ? data.categories[cat.redirectTo]?.label : null };
+    } else if (cat.goalMet && cat.balance < cat.goal) {
+      cat.goalMet = false;
     }
   }
+
+  data.adjustments = data.adjustments || [];
+  data.adjustments.unshift({ id: uid(), date: todayISO(), amount: roundCent(dir * amt), key: key || 'checking', note });
 
   saveData(data);
   hideModal();
   renderAll();
+  if (celebration) showCelebrations([celebration], 0);
 }
 
 // ══════════════════════════════════════════════════
@@ -2286,7 +2776,7 @@ function showReceiptReview(items) {
           <div class="ri-name">${escHtml(item.name)}</div>
           <div class="ri-row">
             <input class="ri-amount" type="number" min="0.01" step="0.01" value="${(item.amount||0).toFixed(2)}" id="ri-amt-${i}">
-            <select class="ri-cat" id="ri-cat-${i}">${catOptions(item.category||'misc')}</select>
+            <select class="ri-cat" id="ri-cat-${i}">${catOptions(item.category||fallbackCategory())}</select>
             <button class="ri-delete" onclick="removeReceiptItem(${i})">✕</button>
           </div>
         </div>`).join('')}
@@ -2500,9 +2990,10 @@ function openAddBill() {
     <div class="form-group">
       <label class="form-label">Category <span class="text-muted text-xs">(icon/display only — bills are paid from checking)</span></label>
       <div class="form-select-wrap">
-        <select class="form-select" id="bill-category">${spendingCatOptions('misc')}</select>
+        <select class="form-select" id="bill-category">${spendingCatOptions(fallbackCategory())}</select>
       </div>
     </div>
+    ${paidByFieldHTML(null)}
     <button class="btn btn-primary" onclick="submitBill(null)">Save Bill</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
@@ -2534,6 +3025,7 @@ function openEditBill(id) {
         <select class="form-select" id="bill-category">${spendingCatOptions(bill.category)}</select>
       </div>
     </div>
+    ${paidByFieldHTML(bill.paidBy)}
     <div class="form-group" style="display:flex;align-items:center;gap:12px">
       <label class="form-label" style="margin:0">Active</label>
       <input type="checkbox" id="bill-active" style="width:20px;height:20px;accent-color:var(--accent)" ${bill.active?'checked':''}>
@@ -2570,6 +3062,7 @@ function submitBill(id) {
       bill.nextDueOverride = nextDueOverride || null;
       bill.category = category;
       bill.active = active;
+      bill.paidBy = readPaidBy(bill.paidBy);
       // Anchor point for the next due-date calc: derive a matching dayOfMonth for
       // display/legacy purposes from whichever date is currently "next due".
       const next = billNextDueDate(bill);
@@ -2580,7 +3073,7 @@ function submitBill(id) {
       id: uid(), label, amount: roundCent(amount),
       recurYears, recurMonths, recurWeeks, recurDays, endOfMonth,
       nextDueOverride: nextDueOverride || null,
-      category, active: true,
+      category, active: true, paidBy: readPaidBy(null),
       lastAppliedDate: null, lastApplied: null, reserveBalance: 0,
     };
     const next = billNextDueDate(newBill);
@@ -2657,7 +3150,8 @@ function fundFormHTML(f) {
       </div>
       <div class="text-xs text-muted mt-8" id="fund-estimate"></div>
       <div class="text-xs text-muted mt-8">Counted in paychecks, not calendar months.</div>
-    </div>`;
+    </div>
+    ${paidByFieldHTML(f ? f.paidBy : null)}`;
 }
 
 function openAddFund() {
@@ -2715,6 +3209,7 @@ function submitFund(id) {
     const f = data.funds.find(x => x.id === id);
     if (!f) return;
     f.label = label; f.icon = icon; f.amount = roundCent(amount); f.everyN = everyN;
+    f.paidBy = readPaidBy(f.paidBy);
     f.active = document.getElementById('fund-active')?.checked !== false;
     f.paychecksUntilNext = document.getElementById('fund-next')?.checked
       ? 0
@@ -2728,7 +3223,7 @@ function submitFund(id) {
       id: uid(),
       key: 'fund_' + uid().replace(/-/g,'').slice(0,10),
       label, icon, amount: roundCent(amount), everyN,
-      paychecksUntilNext: 0, active: true, totalContributed: 0,
+      paychecksUntilNext: 0, active: true, totalContributed: 0, paidBy: readPaidBy(null),
     });
     ensureFundCategories(data);
   }
@@ -2744,6 +3239,413 @@ function deleteFund(id) {
   const bal = fundBal(data, f);
   if (!confirm(`Delete the ${f.label} bucket?\n\nNothing more comes out of your paychecks for it. The ${fmt(bal)} already set aside stays in your checking balance, and past purchases stay in your history.`)) return;
   data.funds = data.funds.filter(x => x.id !== id);
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════
+//  PEOPLE MODALS
+// ══════════════════════════════════════════════════
+function openAddPerson() {
+  document.getElementById('modal-title').textContent = 'Add Person';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" type="text" id="person-name" placeholder="e.g. Sarah" maxlength="24">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Icon</label>
+      <input class="form-input" type="text" id="person-icon" placeholder="💜" maxlength="4">
+    </div>
+    <div class="text-xs text-muted" style="margin-bottom:16px">Their paycheck starts with a copy of ${personPossessive(primaryPersonId(data))} split — change it under Paycheck Split.</div>
+    <button class="btn btn-primary" onclick="submitPerson(null)">Add Person</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  setTimeout(() => { const i = document.getElementById('person-name'); if(i) i.focus(); }, 100);
+}
+
+function openEditPerson(id) {
+  const p = personById(id, data);
+  if (!p) return;
+  const isOnly = people(data).length <= 1;
+  const count = (data.paychecks || []).filter(x => (x.personId || primaryPersonId(data)) === id).length;
+  document.getElementById('modal-title').textContent = 'Edit Person';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" type="text" id="person-name" value="${escHtml(p.name)}" maxlength="24">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Icon</label>
+      <input class="form-input" type="text" id="person-icon" value="${p.icon}" maxlength="4">
+    </div>
+    <div class="text-xs text-muted" style="margin-bottom:16px">${count} paycheck${count===1?'':'s'} recorded · weighted average ${fmt(weightedAvgPaycheck(data, id))}</div>
+    <button class="btn btn-primary" onclick="submitPerson('${id}')">Save Changes</button>
+    ${isOnly ? '' : `<div class="mt-8"><button class="btn btn-danger" onclick="deletePerson('${id}')">Remove Person</button></div>`}
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function submitPerson(id) {
+  const name = document.getElementById('person-name')?.value.trim();
+  const icon = (document.getElementById('person-icon')?.value || '').trim() || '👤';
+  if (!name) { alert('Enter a name'); return; }
+
+  if (id) {
+    const p = personById(id, data);
+    if (p) { p.name = name; p.icon = icon; }
+  } else {
+    const newId = 'p_' + uid().replace(/-/g,'').slice(0,8);
+    data.people.push({ id: newId, name, icon });
+    // Start them on a copy of the main person's split so the total is already 100%.
+    const from = primaryPersonId(data);
+    allKeys(data).forEach(k => setCatPercent(data.categories[k], newId, catPercent(data.categories[k], from)));
+    settingsPersonId = newId;
+  }
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+function deletePerson(id) {
+  const p = personById(id, data);
+  if (!p) return;
+  if (people(data).length <= 1) { alert('You need at least one person.'); return; }
+  const count = (data.paychecks || []).filter(x => x.personId === id).length;
+  const fallback = people(data).find(x => x.id !== id).id;
+  if (!confirm(`Remove ${p.name}?\n\n${count} paycheck${count===1?'':'s'} will be reassigned to ${personName(fallback)}. No money changes. Categories only they used stay, and you can delete those separately.`)) return;
+
+  (data.paychecks || []).forEach(x => { if (x.personId === id) x.personId = fallback; });
+  (data.bills || []).forEach(b => { if (b.paidBy === id) b.paidBy = fallback; });
+  (data.funds || []).forEach(f => { if (f.paidBy === id) f.paidBy = fallback; });
+  (data.goals || []).forEach(g => { if (g.paidBy === id) g.paidBy = fallback; });
+  Object.values(data.categories).forEach(c => {
+    if (c.owner === id) c.owner = fallback;
+    if (c.percents) delete c.percents[id];
+  });
+  data.people = data.people.filter(x => x.id !== id);
+  if (data.activePersonId === id) data.activePersonId = fallback;
+  settingsPersonId = fallback;
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════
+//  CATEGORY MODALS  (create / edit / remove)
+// ══════════════════════════════════════════════════
+function ownerOptions(selected) {
+  return `<option value="shared"${selected==='shared'||!selected?' selected':''}>👥 Both of us</option>` +
+    people(data).map(p => `<option value="${p.id}"${selected===p.id?' selected':''}>${p.icon} ${escHtml(p.name)} only</option>`).join('');
+}
+
+function categoryFormHTML(cat) {
+  return `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" type="text" id="cat-label" placeholder="e.g. Car Fund" maxlength="30" value="${cat ? escHtml(cat.label) : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Icon</label>
+      <input class="form-input" type="text" id="cat-icon" placeholder="🚗" maxlength="4" value="${cat ? cat.icon : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Type</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="cat-type" onchange="onCatTypeChange()">
+          <option value="spending"${!cat || cat.type==='spending'?' selected':''}>Spending — money you spend from checking</option>
+          <option value="savings"${cat && cat.type==='savings'?' selected':''}>Savings — money you move to a savings account</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" id="cat-goal-wrap" style="display:${cat && cat.type==='savings'?'':'none'}">
+      <label class="form-label">Savings Goal <span class="text-muted text-xs">(optional)</span></label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="cat-goal" value="${cat && cat.goal ? cat.goal : ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Whose Is It?</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="cat-owner">${ownerOptions(cat ? cat.owner : 'shared')}</select>
+      </div>
+      <div class="text-xs text-muted mt-8">"Both of us" shows up in both paycheck splits. Otherwise only that person's paycheck can feed it.</div>
+    </div>`;
+}
+
+function onCatTypeChange() {
+  const wrap = document.getElementById('cat-goal-wrap');
+  if (wrap) wrap.style.display = document.getElementById('cat-type')?.value === 'savings' ? '' : 'none';
+}
+
+function openAddCategory() {
+  document.getElementById('modal-title').textContent = 'Add Category';
+  document.getElementById('modal-body').innerHTML = `
+    ${categoryFormHTML(null)}
+    <div class="text-xs text-muted" style="margin-bottom:16px">It starts at 0% of every paycheck — set its share under Paycheck Split.</div>
+    <button class="btn btn-primary" onclick="submitCategory(null)">Add Category</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  setTimeout(() => { const i = document.getElementById('cat-label'); if(i) i.focus(); }, 100);
+}
+
+function openEditCategory(key) {
+  const cat = data.categories[key];
+  if (!cat) return;
+  document.getElementById('modal-title').textContent = 'Edit Category';
+  document.getElementById('modal-body').innerHTML = `
+    ${categoryFormHTML(cat)}
+    <div class="form-group">
+      <label class="form-label">Current Balance</label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" step="0.01" id="cat-balance" value="${(cat.balance||0).toFixed(2)}">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="submitCategory('${key}')">Save Changes</button>
+    <div class="mt-8"><button class="btn btn-danger" onclick="openDeleteCategory('${key}')">Remove Category</button></div>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function submitCategory(key) {
+  const label = document.getElementById('cat-label')?.value.trim();
+  const icon = (document.getElementById('cat-icon')?.value || '').trim() || '📁';
+  const type = document.getElementById('cat-type')?.value === 'savings' ? 'savings' : 'spending';
+  const owner = document.getElementById('cat-owner')?.value || 'shared';
+  const goalRaw = parseFloat(document.getElementById('cat-goal')?.value);
+  const goal = type === 'savings' && goalRaw > 0 ? roundCent(goalRaw) : null;
+  if (!label) { alert('Enter a name'); return; }
+
+  if (key) {
+    const cat = data.categories[key];
+    if (!cat) return;
+    cat.label = label; cat.icon = icon; cat.type = type; cat.owner = owner; cat.goal = goal;
+    const balInput = document.getElementById('cat-balance');
+    const newBal = balInput ? parseFloat(balInput.value) : NaN;
+    if (!isNaN(newBal)) cat.balance = roundCent(newBal);
+    cat.goalMet = goal !== null ? cat.balance >= goal : false;
+  } else {
+    const newKey = 'cat_' + uid().replace(/-/g,'').slice(0,10);
+    const maxOrder = Math.max(0, ...allKeys(data).map(k => data.categories[k].order ?? 0));
+    data.categories[newKey] = {
+      label, icon, type, owner, goal, balance: 0, goalMet: false, redirectTo: null,
+      percents: {}, order: maxOrder + 1, archived: false, custom: true,
+    };
+  }
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// Removing a category must never quietly vaporize money, so the balance has to
+// go somewhere first. The category is archived rather than deleted so old
+// purchases keep showing the right name.
+function openDeleteCategory(key) {
+  const cat = data.categories[key];
+  if (!cat) return;
+  const bal = roundCent(cat.balance || 0);
+  const others = allKeys(data).filter(k => k !== key && data.categories[k].type === cat.type);
+
+  document.getElementById('modal-title').textContent = 'Remove ' + cat.label + '?';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:14px">It stops taking a share of any paycheck. Past purchases keep their label in your history.</div>
+    ${bal !== 0 ? `
+      <div class="form-group">
+        <label class="form-label">Move its ${fmt(bal)} to</label>
+        <div class="form-select-wrap">
+          <select class="form-select" id="cat-move-to">
+            ${others.map(k => `<option value="${k}">${data.categories[k].icon} ${escHtml(data.categories[k].label)}</option>`).join('')}
+            <option value="">Nowhere — just stop tracking it</option>
+          </select>
+        </div>
+        <div class="text-xs text-muted mt-8">${cat.type === 'savings'
+          ? 'Your real savings account is not affected either way.'
+          : 'Your checking balance is not affected either way — this is just the envelope.'}</div>
+      </div>` : ''}
+    <button class="btn btn-danger" onclick="deleteCategory('${key}')">Remove It</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function deleteCategory(key) {
+  const cat = data.categories[key];
+  if (!cat) return;
+  const bal = roundCent(cat.balance || 0);
+  const moveTo = document.getElementById('cat-move-to')?.value;
+  if (bal !== 0 && moveTo && data.categories[moveTo]) {
+    data.categories[moveTo].balance = roundCent((data.categories[moveTo].balance || 0) + bal);
+  }
+  cat.balance = 0;
+  cat.archived = true;
+  people(data).forEach(p => { if (cat.percents) cat.percents[p.id] = 0; });
+  // Nothing may redirect into an archived category.
+  Object.values(data.categories).forEach(c => { if (c.redirectTo === key) c.redirectTo = null; });
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════
+//  SAVINGS TARGET MODALS
+// ══════════════════════════════════════════════════
+// Only worth asking once a second earner exists.
+function paidByFieldHTML(selected) {
+  if (people(data).length < 2) return '';
+  return `
+    <div class="form-group">
+      <label class="form-label">Comes Out Of</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="paidby-select">${paidByOptions(selected)}</select>
+      </div>
+    </div>`;
+}
+function readPaidBy(fallback) {
+  const el = document.getElementById('paidby-select');
+  if (!el) return fallback || primaryPersonId(data);
+  return el.value || fallback || primaryPersonId(data);
+}
+
+function paidByOptions(selected) {
+  const sel = selected || primaryPersonId(data);
+  return people(data).map(p => `<option value="${p.id}"${sel===p.id?' selected':''}>${p.icon} ${personPossessive(p.id)} paycheck</option>`).join('') +
+    `<option value="any"${sel==='any'?' selected':''}>👥 Whichever paycheck comes next</option>`;
+}
+
+function updateGoalEstimate() {
+  const target = parseFloat(document.getElementById('goal-target')?.value) || 0;
+  const due = document.getElementById('goal-due')?.value;
+  const el = document.getElementById('goal-estimate');
+  if (!el) return;
+  if (!target || !due) { el.textContent = ''; return; }
+  const paychecks = fridaysUntilDate(new Date(due + 'T00:00:00'));
+  el.textContent = `${paychecks} paycheck${paychecks===1?'':'s'} before then — about ${fmt(roundCent(target / paychecks))} out of each one.`;
+}
+
+function goalFormHTML(g) {
+  const defaultDue = (() => { const d = new Date(); d.setMonth(d.getMonth()+1); return dateToISO(d); })();
+  return `
+    <div class="form-group">
+      <label class="form-label">What Are You Saving For?</label>
+      <input class="form-input" type="text" id="goal-label" placeholder="e.g. New phone" maxlength="30" value="${g ? escHtml(g.label) : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Icon</label>
+      <input class="form-input" type="text" id="goal-icon" placeholder="📱" maxlength="4" value="${g ? g.icon : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">How Much</label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="goal-target" value="${g ? g.target.toFixed(2) : ''}" oninput="updateGoalEstimate()">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Need It By</label>
+      <input class="form-input" type="date" id="goal-due" value="${g ? g.dueDate : defaultDue}" onchange="updateGoalEstimate()">
+      <div class="text-xs text-muted mt-8" id="goal-estimate"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Comes Out Of</label>
+      <div class="form-select-wrap">
+        <select class="form-select" id="goal-paidby">${paidByOptions(g ? g.paidBy : null)}</select>
+      </div>
+    </div>`;
+}
+
+function openAddGoal() {
+  document.getElementById('modal-title').textContent = 'New Savings Target';
+  document.getElementById('modal-body').innerHTML = `
+    ${goalFormHTML(null)}
+    <div class="text-xs text-muted" style="margin-bottom:16px">Each paycheck sets aside what's left to save divided by the paychecks left. The money waits in checking and stays out of your spendable total.</div>
+    <button class="btn btn-primary" onclick="submitGoal(null)">Start Saving</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  updateGoalEstimate();
+  setTimeout(() => { const i = document.getElementById('goal-label'); if(i) i.focus(); }, 100);
+}
+
+function openEditGoal(id) {
+  const g = (data.goals||[]).find(x => x.id === id);
+  if (!g) return;
+  const bal = goalBal(data, g);
+  document.getElementById('modal-title').textContent = 'Edit Savings Target';
+  document.getElementById('modal-body').innerHTML = `
+    ${goalFormHTML(g)}
+    <div class="form-group">
+      <label class="form-label">Saved So Far</label>
+      <div class="input-wrap"><span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" step="0.01" id="goal-balance" value="${bal.toFixed(2)}">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="submitGoal('${id}')">Save Changes</button>
+    ${goalReady(data, g) ? `<div class="mt-8"><button class="btn btn-secondary" onclick="spendGoal('${id}')">✅ I bought it</button></div>` : ''}
+    <div class="mt-8"><button class="btn btn-danger" onclick="deleteGoal('${id}')">Delete Target</button></div>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  updateGoalEstimate();
+}
+
+function submitGoal(id) {
+  const label = document.getElementById('goal-label')?.value.trim();
+  const icon = (document.getElementById('goal-icon')?.value || '').trim() || '🎯';
+  const target = parseFloat(document.getElementById('goal-target')?.value);
+  const dueDate = document.getElementById('goal-due')?.value;
+  const paidBy = document.getElementById('goal-paidby')?.value || primaryPersonId(data);
+  if (!label) { alert('Enter what you are saving for'); return; }
+  if (!target || target <= 0) { alert('Enter a valid amount'); return; }
+  if (!dueDate) { alert('Pick a date you need it by'); return; }
+
+  if (!data.goals) data.goals = [];
+  if (id) {
+    const g = data.goals.find(x => x.id === id);
+    if (!g) return;
+    g.label = label; g.icon = icon; g.target = roundCent(target); g.dueDate = dueDate; g.paidBy = paidBy;
+    ensureGoalCategories(data);
+    const balInput = document.getElementById('goal-balance');
+    const newBal = balInput ? parseFloat(balInput.value) : NaN;
+    if (!isNaN(newBal)) data.categories[g.key].balance = roundCent(newBal);
+  } else {
+    data.goals.push({
+      id: uid(), key: 'goal_' + uid().replace(/-/g,'').slice(0,10),
+      label, icon, target: roundCent(target), dueDate, paidBy, active: true, created: todayISO(),
+    });
+    ensureGoalCategories(data);
+  }
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+// Bought the thing: log it as a real purchase so checking drops and it shows up
+// in spending history, then retire the target.
+function spendGoal(id) {
+  const g = (data.goals||[]).find(x => x.id === id);
+  if (!g) return;
+  const bal = goalBal(data, g);
+  const short = roundCent(g.target - bal);
+  const msg = short > 0
+    ? `Log ${fmt(g.target)} for ${g.label} and close out this target?\n\nYou saved ${fmt(bal)}, so the last ${fmt(short)} comes out of your regular checking money.`
+    : `Log ${fmt(g.target)} for ${g.label} and close out this target?\n\nIt comes out of checking and shows up in your purchases.`;
+  if (!confirm(msg)) return;
+  // Record what it actually cost, then clear the envelope — any difference
+  // either way settles against ordinary checking money.
+  logExpense(data, g.key, g.target, g.label);
+  data.categories[g.key].balance = 0;
+  data.categories[g.key].archived = true;
+  g.active = false;
+  g.completedDate = todayISO();
+  saveData(data);
+  hideModal();
+  renderAll();
+}
+
+function deleteGoal(id) {
+  const g = (data.goals||[]).find(x => x.id === id);
+  if (!g) return;
+  const bal = goalBal(data, g);
+  if (!confirm(`Delete the ${g.label} target?\n\nThe ${fmt(bal)} saved stays in your checking balance and becomes spendable again.`)) return;
+  data.goals = data.goals.filter(x => x.id !== id);
+  if (data.categories[g.key]) { data.categories[g.key].balance = 0; data.categories[g.key].archived = true; }
   saveData(data);
   hideModal();
   renderAll();
@@ -2769,7 +3671,9 @@ function renderAnalytics() {
   const totalEarned = roundCent(paychecks.reduce((s, p) => s + p.grossAmount, 0));
   const totalSpent  = roundCent(expenses.reduce((s, e) => s + e.amount, 0));
   const savingsNow  = totalSavings(data);
-  const avgPaycheck = paychecks.length ? roundCent(totalEarned / paychecks.length) : 0;
+  const multi = people(data).length > 1;
+  // Recency-weighted, so a raise shows up right away instead of being averaged away.
+  const avgPaycheck = multi ? weightedAvgHousehold(data) : weightedAvgPaycheck(data, null);
 
   const statsEl = document.getElementById('analytics-stats');
   if (statsEl) {
@@ -2777,11 +3681,39 @@ function renderAnalytics() {
       { label: 'Total Earned',  value: fmt(totalEarned),  color: 'var(--success)' },
       { label: 'Total Spent',   value: fmt(totalSpent),   color: 'var(--danger)'  },
       { label: 'Total Saved',   value: fmt(savingsNow),   color: 'var(--accent)'  },
-      { label: 'Avg Paycheck',  value: fmt(avgPaycheck),  color: 'var(--warning)' },
+      { label: multi ? 'Weekly Income' : 'Avg Paycheck', value: fmt(avgPaycheck), color: 'var(--warning)' },
     ].map(s => `<div class="stat-card">
       <div class="stat-label">${s.label}</div>
       <div class="stat-value" style="color:${s.color}">${s.value}</div>
     </div>`).join('');
+  }
+
+  // ── Per-person breakdown (only once there's more than one earner) ──
+  const perPersonEl = document.getElementById('analytics-people');
+  if (perPersonEl) {
+    if (!multi) { perPersonEl.innerHTML = ''; }
+    else {
+      perPersonEl.innerHTML = `<div class="card">
+        <div class="card-title">Income by Person</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">"Current rate" leans on your most recent paychecks, so a raise counts right away.</div>
+        ${people(data).map(p => {
+          const mine = paychecks.filter(x => (x.personId || primaryPersonId(data)) === p.id);
+          const earned = roundCent(mine.reduce((s, x) => s + x.grossAmount, 0));
+          const rate = weightedAvgPaycheck(data, p.id);
+          const plain = mine.length ? roundCent(earned / mine.length) : 0;
+          return `<div class="settings-row">
+            <div class="sr-label">
+              <div style="font-weight:700">${p.icon} ${escHtml(p.name)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${mine.length} paycheck${mine.length===1?'':'s'} · ${fmt(earned)} total · plain average ${fmt(plain)}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:17px;font-weight:800;color:var(--success)">${fmt(rate)}</div>
+              <div style="font-size:11px;color:var(--text-muted)">current rate</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
   }
 
   // ── Spending by category ──
@@ -2937,19 +3869,24 @@ function saveCheckingBalance() {
 }
 
 function savePctSettings() {
+  const pid = settingsPerson();
   let sum = 0;
   document.querySelectorAll('.sr-pct-input').forEach(el => sum += Number(el.value)||0);
-  if (sum !== 100) { alert(`Must total 100%. Currently: ${sum}%`); return; }
+  if (sum !== 100) { alert(`${personName(pid) === 'Me' ? 'Your' : personName(pid) + "'s"} split must total 100%. Currently: ${sum}%`); return; }
   document.querySelectorAll('.sr-pct-input').forEach(el => {
-    data.categories[el.dataset.key].percent = Number(el.value);
+    setCatPercent(data.categories[el.dataset.key], pid, Number(el.value));
   });
   saveData(data);
   renderAll();
-  alert('Percentages saved!');
+  alert(`${personName(pid) === 'Me' ? 'Your' : personName(pid) + "'s"} percentages saved!`);
 }
 
 function resetPcts() {
-  ALL_KEYS.forEach(k => data.categories[k].percent = DEFAULT_CATEGORIES[k].percent);
+  const pid = settingsPerson();
+  allKeys(data).forEach(k => {
+    const def = DEFAULT_CATEGORIES[k];
+    setCatPercent(data.categories[k], pid, def ? def.percent : 0);
+  });
   saveData(data);
   renderSettings();
 }
@@ -2968,7 +3905,7 @@ function saveBalanceSettings() {
 function clearAllData() {
   if (document.getElementById('clear-confirm')?.value.trim() !== 'DELETE') { alert('Type DELETE to confirm'); return; }
   localStorage.removeItem(STORAGE_KEY);
-  data = freshData();
+  data = migrateData(freshData());
   document.getElementById('clear-confirm').value = '';
   renderAll();
 }
@@ -3001,6 +3938,7 @@ function hideSetup() { document.getElementById('setup-overlay').style.display = 
 function submitSetup() {
   const keys = ['emergencyFund','weddingFund','collegeSavings','food','fun','clothing','misc'];
   keys.forEach(k => {
+    if (!data.categories[k]) return;
     const inp = document.getElementById('setup-' + k);
     const val = inp ? roundCent(parseFloat(inp.value) || 0) : 0;
     data.categories[k].balance = val;
