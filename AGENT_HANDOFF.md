@@ -325,5 +325,72 @@ Every category gained:
 ### Asked for, not built: live sync between two phones
 The user wants his fiancée's phone to see the same data, suggesting a Google Sheet as the store with a pairing code. Not built this session, and the honest reasons: a static GitHub Pages page has no server to hold Google credentials, and two phones writing the same document needs real conflict handling — last-write-wins would quietly eat one person's entries. The workable path, if it comes back: a **Google Apps Script web app** the user deploys from his own account (it can read/write a Sheet and serve JSON without any secret living in the app), the app storing that deployment URL plus a shared code, and syncing an **append-only log of operations** rather than the whole document, so both phones can merge instead of overwrite. Quote him a realistic scope before starting; it is bigger than everything in this release put together.
 
+## 12. Session v2026.10.0 — Sharing between two phones
+
+The sync the previous session declined to build. Two files were added:
+`apps-script/Code.gs` (the backend the user deploys to his own Google account)
+and `SYNC-SETUP.md` (his click-by-click guide).
+
+### Shape
+Phones talk to a **Google Apps Script web app** bound to a Sheet in the user's
+Drive. The Sheet holds an append-only `ops` log (one row per push batch) and a
+chunked `state` snapshot. No credentials live in the app; the 12-character
+pairing code is the only access control, which `SYNC-SETUP.md` says plainly.
+POSTs go out as `text/plain` on purpose — that keeps them "simple" requests so
+the browser skips a CORS preflight Apps Script cannot answer. Don't "fix" that
+to `application/json`.
+
+### Why the merge is safe (the important part)
+The diff is **semantic, not textual**:
+- `SYNC_DELTA_FIELDS` (`balance`, `checkingBalance`, `reserveBalance`,
+  `totalContributed`) travel as **deltas** — "checking −$40", never "checking =
+  $960". Deltas commute, so two phones spending at once both land. **Adding a
+  field to that set is a money-correctness decision**: only true accumulators
+  belong there. `bill.amount` must never be one, or editing a bill would add.
+- `SYNC_KEYED` lists merge per item by id (add / delete / per-field), so two new
+  expenses are two adds.
+- Everything else is last-write-wins, which is what settings want.
+
+Three subtleties that were found by testing and must not be undone:
+1. **`syncNormalize(data)` runs BEFORE the diff** in `syncRun`. It used to run
+   only when remote ops arrived, which let migration-added fields drift into the
+   baseline and never reach the other phone.
+2. **Sort order needs tiebreakers** (`date`, then `createdAt`, then `id`).
+   Without them two same-day paychecks ordered differently per phone, so each
+   showed a different "current paycheck". New records now carry `createdAt`.
+3. **Own non-delta ops are re-applied on top of incoming ones.** The sheet's
+   sequence is the tiebreak, and anything returned in a push response was
+   sequenced before the batch just pushed. Without this, both phones renaming
+   the same category each kept their own name forever. Deltas are excluded from
+   the re-apply — re-applying one would double the money.
+
+`processDueBills` also gained an idempotence guard: if an expense already exists
+for that `billId` + date, it advances the marker without charging. Both phones
+run it on open, so without the guard a bill is paid twice.
+
+### Testing
+`apps-script/Code.gs` is executed by the Node tests against fake
+`SpreadsheetApp`/`LockService`/`PropertiesService` objects, so the protocol under
+test is the code that ships. Two simulated phones covered: concurrent purchases,
+concurrent paychecks, concurrent config edits, delete-vs-edit, offline stretches,
+a trimmed op log forcing re-bootstrap, a 137KB snapshot spanning four cells, and
+a wrong pairing code. A seeded fuzz test runs ~290 random interleaved operations
+per seed and asserts both phones end **byte-identical** with checking matching an
+independently-kept ledger; three seeds pass.
+
+**Untested and untestable from here:** Google's own plumbing — deployment,
+authorisation, CORS in the real browser. If the user reports trouble, that is
+the first place to look, not the merge logic.
+
+### Also added
+Settings → 💾 Backup: download a JSON backup, restore one. Works with or without
+sharing, and both the host setup and joining stash the previous data in
+`financeData_backupBeforeSync` first.
+
+### Known limits (told to the user)
+- Updates land within ~10s while the app is open, not instantly; Apps Script
+  can't push.
+- Sharing is off by default and `activePersonId` stays device-local.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

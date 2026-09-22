@@ -266,6 +266,10 @@
     .bill-fund-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
     .bill-fund-meta span { color: var(--accent); font-weight: 600; }
 
+    /* Sharing trouble banner */
+    .sync-banner { background: var(--danger)18; border: 1px solid var(--danger)55; color: var(--text);
+                   border-radius: var(--radius-sm); padding: 11px 13px; font-size: 13px; margin-bottom: 12px; }
+
     /* Person picker (whose paycheck / whose split) */
     .person-pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .person-pick { flex: 1; min-width: 110px; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
@@ -418,6 +422,7 @@
   <main id="main">
     <!-- Tab 0: Dashboard -->
     <div id="tab-0" class="tab-content active">
+      <div id="sync-banner" class="sync-banner" style="display:none"></div>
       <div class="card" id="balance-card">
         <div class="label">Total Saved</div>
         <div class="amount" id="dash-total">$0.00</div>
@@ -558,6 +563,13 @@
         </div>
       </div>
 
+      <!-- Sharing -->
+      <div class="card">
+        <div class="card-title">📡 Share With Another Phone</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Keep two phones on the same numbers through a Google Sheet you own. Changes from both phones merge — neither one overwrites the other.</div>
+        <div id="sync-settings"></div>
+      </div>
+
       <!-- People -->
       <div class="card">
         <div class="card-title">👥 People</div>
@@ -630,6 +642,14 @@
         </div>
       </div>
 
+      <!-- Backup -->
+      <div class="card">
+        <div class="card-title">💾 Backup</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Save a copy of everything to a file, or put one back. Worth doing before any big change.</div>
+        <button class="btn btn-secondary" onclick="exportData()" style="margin-bottom:8px">Download Backup</button>
+        <button class="btn btn-secondary" onclick="openImportData()">Restore From Backup</button>
+      </div>
+
       <!-- Danger -->
       <div class="card" style="border-color:#e0555533">
         <div class="card-title">Danger Zone</div>
@@ -650,7 +670,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.9.0</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.10.0</div>
         <div class="text-xs text-muted">Last updated Sep 2026</div>
       </div>
     </div>
@@ -760,7 +780,13 @@ function fallbackCategory() {
 function loadData() {
   try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
 }
-function saveData(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+function saveLocal(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+// Every mutation in the app already funnels through saveData, so hooking it here
+// is what lets sharing pick up changes without touching the other 25 functions.
+function saveData(d) {
+  saveLocal(d);
+  if (typeof syncCfg !== 'undefined' && syncCfg.enabled && !syncApplying) syncSchedulePush();
+}
 function freshData() {
   return {
     version: 2,
@@ -990,7 +1016,7 @@ function processNewPaycheck(d, grossAmount, personId) {
   const celebrations = [];
 
   const pid = uid();
-  d.paychecks.unshift({ id: pid, date: todayISO(), personId, grossAmount, splits, percents, billContributionsTotal,
+  d.paychecks.unshift({ id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount, splits, percents, billContributionsTotal,
     fundContributionsTotal: fundContribs.total, fundContributions: fundContribs.items,
     goalContributionsTotal: goalContribs.total, goalContributions: goalContribs.items });
 
@@ -1014,7 +1040,7 @@ function logExpense(d, categoryKey, amount, note) {
   if (d.categories[categoryKey].type === 'spending') {
     d.checkingBalance = roundCent((d.checkingBalance||0) - amount);
   }
-  d.expenses.unshift({ id: uid(), date: todayISO(), amount, category: categoryKey, note: note||'' });
+  d.expenses.unshift({ id: uid(), date: todayISO(), createdAt: Date.now(), amount, category: categoryKey, note: note||'' });
   return d;
 }
 
@@ -1313,6 +1339,16 @@ function processDueBills(d) {
 
     function applyOn(date) {
       const dateStr = date.toISOString().split('T')[0];
+      // With two phones sharing, both run this on open. If the other phone has
+      // already charged this bill for this date, just move the marker forward —
+      // charging it twice would take the money twice.
+      const already = (d.expenses || []).some(e => e.isBill && e.billId === bill.id && e.date === dateStr);
+      if (already) {
+        bill.lastAppliedDate = dateStr;
+        bill.lastApplied = dateStr;
+        if (bill.nextDueOverride === dateStr) bill.nextDueOverride = null;
+        return;
+      }
       const reserve = bill.reserveBalance || 0;
       // Bills are always paid from checking — the sinking fund reserve was built
       // from checking over time, so we just deduct the bill amount from checking now.
@@ -1951,6 +1987,9 @@ function renderSettings() {
   // Checking
   document.getElementById('settings-checking').value = (data.checkingBalance||0).toFixed(2);
 
+  // Sharing
+  renderSyncSettings();
+
   // People
   renderPeopleSettings();
 
@@ -2141,7 +2180,7 @@ function submitPaycheck(mode) {
       }
     });
     const pid = uid();
-    data.paychecks.unshift({ id: pid, date: todayISO(), personId, grossAmount: gross, splits, percents, mode: 'nobalances' });
+    data.paychecks.unshift({ id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount: gross, splits, percents, mode: 'nobalances' });
     saveData(data);
     hideModal();
     renderAll();
@@ -2508,7 +2547,7 @@ function submitCheckingAdj(dir) {
   }
 
   data.adjustments = data.adjustments || [];
-  data.adjustments.unshift({ id: uid(), date: todayISO(), amount: roundCent(dir * amt), key: key || 'checking', note });
+  data.adjustments.unshift({ id: uid(), date: todayISO(), createdAt: Date.now(), amount: roundCent(dir * amt), key: key || 'checking', note });
 
   saveData(data);
   hideModal();
@@ -3963,11 +4002,535 @@ if ('serviceWorker' in navigator) {
 }
 
 // ══════════════════════════════════════════════════
+//  SHARING / SYNC BETWEEN PHONES
+//
+//  Both phones talk to a Google Apps Script web app (see apps-script/Code.gs)
+//  that keeps an append-only log of change batches in a Google Sheet. Nothing
+//  here ever sends a whole document over the top of someone else's work:
+//
+//    • MONEY fields sync as DELTAS (+$12.50), never as values. Deltas from two
+//      phones both land, in any order, and the totals come out right. This is
+//      the whole reason a merge is safe — if she logs groceries while he logs
+//      gas, both come off checking.
+//    • LISTS (expenses, paychecks, bills…) sync per item by id: added, removed,
+//      or field-by-field. Two new expenses are two adds, not a fight.
+//    • EVERYTHING ELSE (names, icons, percentages, dates) is last-write-wins,
+//      which is right for settings: the newer edit should win.
+//
+//  The sync config lives in its own localStorage key so it never syncs itself.
+// ══════════════════════════════════════════════════
+const SYNC_CFG_KEY  = 'financeSyncCfg';
+const SYNC_BASE_KEY = 'financeSyncBase';
+const SYNC_BACKUP_KEY = 'financeData_backupBeforeSync';
+const SYNC_POLL_MS = 10000;      // how often an open app checks for the other phone
+const SYNC_DEBOUNCE_MS = 1200;   // wait this long after a change before pushing
+const SYNC_SNAPSHOT_EVERY = 8;   // upload a full snapshot every N pushes
+
+// Fields that accumulate money. Only these merge as deltas.
+const SYNC_DELTA_FIELDS = new Set(['balance', 'checkingBalance', 'reserveBalance', 'totalContributed']);
+// Lists that merge per item, and the field that identifies an item.
+const SYNC_KEYED = {
+  paychecks: 'id', expenses: 'id', transfers: 'paycheckId', bills: 'id',
+  funds: 'id', goals: 'id', people: 'id', adjustments: 'id', items: 'key',
+};
+// Device-local preferences that should never travel.
+const SYNC_SKIP = new Set(['activePersonId']);
+
+let syncCfg = loadSyncCfg();
+let syncBaseline = null;    // the state both phones last agreed on
+let syncApplying = false;   // true while merging, so remote changes don't echo back
+let syncBusy = false, syncPending = false, syncPushTimer = null, syncPollTimer = null;
+
+function loadSyncCfg() {
+  try {
+    const raw = localStorage.getItem(SYNC_CFG_KEY);
+    const cfg = raw ? JSON.parse(raw) : {};
+    return Object.assign({ enabled: false, url: '', code: '', deviceId: '', lastSeq: 0,
+      pushesSinceSnapshot: 0, lastSyncAt: null, lastError: '', deviceName: '' }, cfg);
+  } catch { return { enabled: false, url: '', code: '', deviceId: '', lastSeq: 0, pushesSinceSnapshot: 0, lastSyncAt: null, lastError: '', deviceName: '' }; }
+}
+function saveSyncCfg() { try { localStorage.setItem(SYNC_CFG_KEY, JSON.stringify(syncCfg)); } catch {} }
+function saveSyncBaseline() { try { localStorage.setItem(SYNC_BASE_KEY, JSON.stringify(syncBaseline)); } catch {} }
+function loadSyncBaseline() {
+  try { const raw = localStorage.getItem(SYNC_BASE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+function syncDeepCopy(o) { return JSON.parse(JSON.stringify(o)); }
+function syncNewCode() {
+  // No 0/O/1/I — this gets read off a screen and typed by hand.
+  const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 12; i++) s += alpha[Math.floor(Math.random() * alpha.length)];
+  return s;
+}
+
+// ── Diff: what changed since the state we last agreed on ──────────────────
+function syncDiff(base, cur, path) {
+  path = path || [];
+  const ops = [];
+  const keys = new Set([...Object.keys(base || {}), ...Object.keys(cur || {})]);
+  keys.forEach(k => {
+    if (!path.length && SYNC_SKIP.has(k)) return;
+    const vb = base ? base[k] : undefined;
+    const vc = cur ? cur[k] : undefined;
+    const here = path.concat([k]);
+
+    if (Array.isArray(vc) || Array.isArray(vb)) {
+      const idField = SYNC_KEYED[k];
+      if (idField) { syncDiffList(vb || [], vc || [], here, idField, ops); return; }
+      if (JSON.stringify(vb) !== JSON.stringify(vc)) ops.push({ t: 's', p: here, v: vc });
+      return;
+    }
+    if (vc && typeof vc === 'object' && vb && typeof vb === 'object') {
+      ops.push(...syncDiff(vb, vc, here));
+      return;
+    }
+    if (typeof vc === 'number' && typeof vb === 'number' && SYNC_DELTA_FIELDS.has(k)) {
+      const delta = roundCent(vc - vb);
+      if (delta !== 0) ops.push({ t: 'd', p: here, v: delta });
+      return;
+    }
+    if (JSON.stringify(vb) !== JSON.stringify(vc)) ops.push({ t: 's', p: here, v: vc });
+  });
+  return ops;
+}
+
+function syncDiffList(baseArr, curArr, path, idField, ops) {
+  const baseById = new Map(baseArr.map(x => [x && x[idField], x]));
+  const curById = new Map(curArr.map(x => [x && x[idField], x]));
+  baseById.forEach((item, id) => { if (!curById.has(id)) ops.push({ t: 'del', p: path, k: id, f: idField }); });
+  curById.forEach((item, id) => {
+    if (!baseById.has(id)) { ops.push({ t: 'add', p: path, v: item, f: idField }); return; }
+    ops.push(...syncDiff(baseById.get(id), item, path.concat([{ k: id, f: idField }])));
+  });
+}
+
+// ── Apply: fold someone else's changes into a document ────────────────────
+function syncResolve(root, path) {
+  let node = root;
+  for (let i = 0; i < path.length; i++) {
+    const seg = path[i];
+    if (node === undefined || node === null) return null;
+    if (typeof seg === 'object') {
+      if (!Array.isArray(node)) return null;
+      node = node.find(x => x && x[seg.f] === seg.k);
+    } else {
+      if (i === path.length - 1) return { parent: node, key: seg };
+      if (node[seg] === undefined || node[seg] === null) node[seg] = {};
+      node = node[seg];
+    }
+    if (i === path.length - 1 && typeof seg === 'object') return { parent: node, key: null };
+  }
+  return { parent: node, key: null };
+}
+
+function syncApplyOp(root, op) {
+  if (op.t === 'add' || op.t === 'del') {
+    const holder = syncResolve(root, op.p);
+    if (!holder || !holder.parent) return;
+    let arr = holder.key !== null ? holder.parent[holder.key] : holder.parent;
+    if (!Array.isArray(arr)) {
+      if (holder.key === null) return;
+      arr = holder.parent[holder.key] = [];
+    }
+    const idField = op.f || 'id';
+    if (op.t === 'add') {
+      const id = op.v && op.v[idField];
+      if (arr.some(x => x && x[idField] === id)) return; // already have it
+      arr.push(syncDeepCopy(op.v));
+    } else {
+      const i = arr.findIndex(x => x && x[idField] === op.k);
+      if (i !== -1) arr.splice(i, 1);
+    }
+    return;
+  }
+
+  const spot = syncResolve(root, op.p);
+  if (!spot || !spot.parent || spot.key === null) return; // item was deleted here — nothing to update
+  if (op.t === 'd') {
+    spot.parent[spot.key] = roundCent((Number(spot.parent[spot.key]) || 0) + op.v);
+  } else {
+    if (op.v === undefined) delete spot.parent[spot.key];
+    else spot.parent[spot.key] = syncDeepCopy(op.v);
+  }
+}
+
+function syncApplyOps(root, ops) { (ops || []).forEach(op => syncApplyOp(root, op)); }
+
+// Put a merged document back into a shape the rest of the app expects:
+// newest-first lists, counters in range, and every derived bucket present.
+function syncNormalize(d) {
+  migrateData(d);
+  // Newest first, with tiebreakers so two phones always agree on the order of
+  // things entered on the same day.
+  const byDateDesc = (a, b) =>
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    ((b.createdAt || 0) - (a.createdAt || 0)) ||
+    String(b.id || '').localeCompare(String(a.id || ''));
+  if (Array.isArray(d.expenses)) d.expenses.sort(byDateDesc);
+  if (Array.isArray(d.adjustments)) d.adjustments.sort(byDateDesc);
+  if (Array.isArray(d.paychecks)) d.paychecks.sort(byDateDesc);
+  if (Array.isArray(d.transfers)) {
+    const order = {};
+    (d.paychecks || []).forEach((p, i) => order[p.id] = i);
+    d.transfers.sort((a, b) => (order[a.paycheckId] ?? 9e9) - (order[b.paycheckId] ?? 9e9));
+  }
+  (d.funds || []).forEach(f => {
+    const n = Math.max(1, f.everyN || 1);
+    f.paychecksUntilNext = Math.min(n - 1, Math.max(0, f.paychecksUntilNext || 0));
+  });
+  Object.values(d.categories || {}).forEach(c => { c.balance = roundCent(c.balance || 0); });
+  d.checkingBalance = roundCent(d.checkingBalance || 0);
+  return d;
+}
+
+// ── Talking to the sheet ──────────────────────────────────────────────────
+// text/plain keeps this a "simple" request so the browser skips the CORS
+// preflight, which Apps Script has no way to answer.
+async function syncFetch(body, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs || 20000);
+  try {
+    const res = await fetch(syncCfg.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+      redirect: 'follow',
+    });
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); }
+    catch { throw new Error('The link did not return data. Check that the Web App URL ends in /exec and is shared with "Anyone".'); }
+    if (!json.ok) throw new Error(json.error || 'Sync refused the request');
+    return json;
+  } finally { clearTimeout(timer); }
+}
+
+function syncSchedulePush() {
+  if (!syncCfg.enabled) return;
+  clearTimeout(syncPushTimer);
+  syncPushTimer = setTimeout(() => syncRun(false), SYNC_DEBOUNCE_MS);
+}
+
+// One code path for both directions: an empty op list is just a poll.
+async function syncRun(forceSnapshot) {
+  if (!syncCfg.enabled || !syncCfg.url) return;
+  if (syncBusy) { syncPending = true; return; }
+  syncBusy = true;
+  syncRenderStatus('syncing');
+  try {
+    if (!syncBaseline) syncBaseline = syncDeepCopy(data);
+    // Canonicalize first: sorting and migration must happen before the diff, or
+    // their changes never reach the other phone.
+    syncApplying = true;
+    syncNormalize(data);
+    syncApplying = false;
+    // Freeze what we're pushing now. Anything the user types during the request
+    // stays out of this batch and goes in the next one.
+    const pushedState = syncDeepCopy(data);
+    const ops = syncDiff(syncBaseline, pushedState);
+
+    const wantSnapshot = forceSnapshot || syncCfg.pushesSinceSnapshot >= SYNC_SNAPSHOT_EVERY;
+    const body = {
+      action: 'push', code: syncCfg.code, deviceId: syncCfg.deviceId,
+      since: syncCfg.lastSeq, ops,
+    };
+    if (wantSnapshot && ops.length === 0) body.snapshot = JSON.stringify(pushedState);
+    else if (wantSnapshot) body.snapshot = JSON.stringify(pushedState);
+
+    const res = await syncFetch(body);
+
+    if (res.stale) { await syncBootstrap(true); return; }
+
+    const remote = [];
+    (res.ops || []).forEach(batch => remote.push(...(batch.ops || [])));
+    if (remote.length) {
+      // The sheet's ordering decides who wins. Anything it hands back here was
+      // sequenced BEFORE the batch we just pushed, so our edits go on top —
+      // otherwise two phones renaming the same category would each keep their
+      // own name forever. Deltas are excluded: money must never apply twice.
+      const mineOnTop = ops.filter(o => o.t !== 'd');
+
+      // Apply to the live document *and* to what we just pushed — the result is
+      // the new agreed state, while anything typed meanwhile stays pending.
+      syncApplying = true;
+      syncApplyOps(data, remote);
+      syncApplyOps(data, mineOnTop);
+      syncNormalize(data);
+      syncApplying = false;
+      saveLocal(data);
+      syncApplyOps(pushedState, remote);
+      syncApplyOps(pushedState, mineOnTop);
+      renderAll();
+    }
+    syncNormalize(pushedState);
+    syncBaseline = pushedState;
+    saveSyncBaseline();
+
+    syncCfg.lastSeq = Math.max(syncCfg.lastSeq || 0, res.seq || 0);
+    syncCfg.pushesSinceSnapshot = wantSnapshot ? 0 : (syncCfg.pushesSinceSnapshot + (ops.length ? 1 : 0));
+    syncCfg.lastSyncAt = Date.now();
+    syncCfg.lastError = '';
+    saveSyncCfg();
+    syncRenderStatus('ok');
+  } catch (err) {
+    syncApplying = false;
+    syncCfg.lastError = String(err && err.message || err);
+    saveSyncCfg();
+    syncRenderStatus('error');
+  } finally {
+    syncBusy = false;
+    if (syncPending) { syncPending = false; setTimeout(() => syncRun(false), 400); }
+  }
+}
+
+// Take the shared snapshot and start from it. Used when joining from a second
+// phone, or when this phone has been away longer than the op log goes back.
+async function syncBootstrap(silent) {
+  const res = await syncFetch({ action: 'snapshot', code: syncCfg.code });
+  if (!res.snapshot) {
+    if (!silent) alert('Nothing has been shared yet. Set it up on the first phone, then join from this one.');
+    return false;
+  }
+  try { localStorage.setItem(SYNC_BACKUP_KEY, localStorage.getItem(STORAGE_KEY) || ''); } catch {}
+  const incoming = JSON.parse(res.snapshot);
+  data = syncNormalize(incoming);
+  saveLocal(data);
+  syncBaseline = syncDeepCopy(data);
+  saveSyncBaseline();
+  syncCfg.lastSeq = res.seq || 0;
+  syncCfg.pushesSinceSnapshot = 0;
+  saveSyncCfg();
+  renderAll();
+  // Catch anything that landed after the snapshot was taken.
+  await syncRun(false);
+  return true;
+}
+
+function syncStartPolling() {
+  clearInterval(syncPollTimer);
+  if (!syncCfg.enabled) return;
+  syncPollTimer = setInterval(() => {
+    if (document.hidden) return;
+    syncRun(false);
+  }, SYNC_POLL_MS);
+}
+
+function syncStatusLine() {
+  if (!syncCfg.enabled) return 'Off — this phone keeps its data to itself.';
+  if (syncCfg.lastError) return '⚠️ ' + syncCfg.lastError;
+  if (!syncCfg.lastSyncAt) return 'Connected — waiting for the first sync.';
+  const secs = Math.round((Date.now() - syncCfg.lastSyncAt) / 1000);
+  if (secs < 15) return '✅ Up to date, just now.';
+  if (secs < 90) return `✅ Up to date, ${secs}s ago.`;
+  const mins = Math.round(secs / 60);
+  return `✅ Last synced ${mins} minute${mins === 1 ? '' : 's'} ago.`;
+}
+
+function syncRenderStatus(state) {
+  const el = document.getElementById('sync-status');
+  if (el) el.textContent = state === 'syncing' ? 'Syncing…' : syncStatusLine();
+  const banner = document.getElementById('sync-banner');
+  if (banner) {
+    const bad = syncCfg.enabled && syncCfg.lastError;
+    banner.style.display = bad ? '' : 'none';
+    banner.textContent = bad ? `⚠️ Sharing is stuck: ${syncCfg.lastError} — open Settings to fix it.` : '';
+  }
+}
+
+// ── Setup UI ──────────────────────────────────────────────────────────────
+// Everything the other phone needs travels as one blob, so there is a single
+// thing to text across instead of a long URL plus a code.
+function syncInviteString() {
+  try { return btoa(JSON.stringify({ u: syncCfg.url, c: syncCfg.code })).replace(/=+$/, ''); }
+  catch { return ''; }
+}
+function syncParseInvite(s) {
+  try {
+    const padded = s.trim() + '==='.slice((s.trim().length + 3) % 4);
+    const obj = JSON.parse(atob(padded));
+    if (obj && obj.u && obj.c) return { url: String(obj.u), code: String(obj.c) };
+  } catch {}
+  return null;
+}
+
+function openSyncSetup() {
+  const on = syncCfg.enabled;
+  document.getElementById('modal-title').textContent = 'Share With Another Phone';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:14px">
+      Your data lives in a Google Sheet <strong>you own</strong>. Both phones read and write it, and changes merge — neither phone overwrites the other.
+    </div>
+    ${on ? `
+      <div class="card" style="margin-bottom:14px">
+        <div class="text-sm" id="sync-modal-status">${escHtml(syncStatusLine())}</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Invite Code For The Other Phone</label>
+        <textarea class="form-input" id="sync-invite" rows="3" readonly style="font-family:monospace;font-size:12px">${escHtml(syncInviteString())}</textarea>
+        <div class="text-xs text-muted mt-8">Text this to her. On her phone: Settings → Share With Another Phone → Join. Treat it like a password — anyone with it can read and change your numbers.</div>
+      </div>
+      <button class="btn btn-primary" onclick="syncCopyInvite()">Copy Invite Code</button>
+      <div class="mt-8"><button class="btn btn-secondary" onclick="syncManualSync()">Sync Now</button></div>
+      <div class="mt-8"><button class="btn btn-danger" onclick="syncTurnOff()">Turn Sharing Off</button></div>
+    ` : `
+      <div class="form-group">
+        <label class="form-label">First Phone — Set It Up</label>
+        <div class="text-xs text-muted" style="margin-bottom:8px">One-time setup on a computer: follow <strong>SYNC-SETUP.md</strong> in your repo to create the Sheet and paste in the script, then paste the Web App URL here.</div>
+        <input class="form-input" type="url" id="sync-url" placeholder="https://script.google.com/macros/s/..../exec" autocomplete="off">
+      </div>
+      <button class="btn btn-primary" onclick="syncSetupHost()">Connect This Phone</button>
+      <div class="text-xs text-muted mt-8" style="margin-bottom:18px">Your current data becomes the shared copy.</div>
+
+      <div class="form-group" style="border-top:1px solid var(--border);padding-top:16px">
+        <label class="form-label">Second Phone — Join</label>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Paste the invite code from the first phone.</div>
+        <textarea class="form-input" id="sync-join" rows="3" placeholder="Paste invite code" style="font-family:monospace;font-size:12px"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="syncSetupJoin()">Join</button>
+      <div class="text-xs text-muted mt-8">Joining replaces whatever is on this phone with the shared data.</div>
+    `}
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Close</button></div>`;
+  showModal();
+}
+
+function syncCopyInvite() {
+  const el = document.getElementById('sync-invite');
+  if (!el) return;
+  el.select();
+  try { document.execCommand('copy'); } catch {}
+  if (navigator.clipboard) navigator.clipboard.writeText(el.value).catch(() => {});
+  alert('Invite code copied — text it to her phone.');
+}
+
+async function syncSetupHost() {
+  const url = document.getElementById('sync-url')?.value.trim();
+  if (!url) { alert('Paste the Web App URL first.'); return; }
+  if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)) {
+    if (!confirm('That does not look like an Apps Script /exec URL. Try it anyway?')) return;
+  }
+  syncCfg.url = url;
+  syncCfg.code = syncCfg.code || syncNewCode();
+  syncCfg.deviceId = syncCfg.deviceId || ('dev_' + uid().replace(/-/g, '').slice(0, 10));
+  syncCfg.lastSeq = 0;
+  syncCfg.lastError = '';
+  try {
+    await syncFetch({ action: 'ping', code: syncCfg.code });
+  } catch (err) {
+    alert('Could not reach the sheet:\n\n' + (err.message || err) + '\n\nCheck the URL, and that the deployment is set to "Anyone".');
+    return;
+  }
+  // This phone's data becomes the shared copy.
+  try { localStorage.setItem(SYNC_BACKUP_KEY, localStorage.getItem(STORAGE_KEY) || ''); } catch {}
+  syncCfg.enabled = true;
+  syncBaseline = null;
+  saveSyncCfg();
+  await syncRun(true);
+  syncStartPolling();
+  renderAll();
+  if (syncCfg.lastError) { alert('Connected, but the first sync failed:\n\n' + syncCfg.lastError); return; }
+  openSyncSetup();
+  alert('Sharing is on. Copy the invite code and send it to the other phone.');
+}
+
+async function syncSetupJoin() {
+  const raw = document.getElementById('sync-join')?.value.trim();
+  if (!raw) { alert('Paste the invite code first.'); return; }
+  const parsed = syncParseInvite(raw);
+  if (!parsed) { alert('That invite code is not readable. Copy it again from the other phone.'); return; }
+  if (!confirm('Join this shared account?\n\nWhatever is on THIS phone is replaced by the shared data. A backup is kept on this phone just in case.')) return;
+  syncCfg.url = parsed.url;
+  syncCfg.code = parsed.code;
+  syncCfg.deviceId = syncCfg.deviceId || ('dev_' + uid().replace(/-/g, '').slice(0, 10));
+  syncCfg.enabled = true;
+  syncCfg.lastSeq = 0;
+  syncCfg.lastError = '';
+  saveSyncCfg();
+  try {
+    const ok = await syncBootstrap(false);
+    if (!ok) { syncCfg.enabled = false; saveSyncCfg(); return; }
+  } catch (err) {
+    syncCfg.enabled = false; saveSyncCfg();
+    alert('Could not join:\n\n' + (err.message || err));
+    return;
+  }
+  syncStartPolling();
+  renderAll();
+  alert('Joined. Both phones are sharing now.');
+}
+
+async function syncManualSync() {
+  await syncRun(true);
+  const el = document.getElementById('sync-modal-status');
+  if (el) el.textContent = syncStatusLine();
+  if (syncCfg.lastError) alert('Sync failed:\n\n' + syncCfg.lastError);
+}
+
+function syncTurnOff() {
+  if (!confirm('Stop sharing on this phone?\n\nYour data stays here exactly as it is, and the other phone keeps its own copy. Nothing is deleted from the sheet.')) return;
+  syncCfg.enabled = false;
+  syncCfg.lastError = '';
+  saveSyncCfg();
+  clearInterval(syncPollTimer);
+  hideModal();
+  renderAll();
+}
+
+function renderSyncSettings() {
+  const el = document.getElementById('sync-settings');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="text-sm" id="sync-status" style="margin-bottom:12px">${escHtml(syncStatusLine())}</div>
+    <button class="btn btn-secondary" onclick="openSyncSetup()">${syncCfg.enabled ? 'Manage Sharing' : 'Set Up Sharing'}</button>`;
+}
+
+// ── Backup / restore (works with or without sharing) ──────────────────────
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `finance-tracker-${todayISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function openImportData() {
+  document.getElementById('modal-title').textContent = 'Restore From Backup';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:12px">Paste the contents of a backup file. This replaces everything on this phone.</div>
+    <div class="form-group">
+      <textarea class="form-input" id="import-json" rows="6" placeholder='{"version":2,...}' style="font-family:monospace;font-size:11px"></textarea>
+    </div>
+    <button class="btn btn-danger" onclick="submitImportData()">Replace My Data</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+}
+
+function submitImportData() {
+  const raw = document.getElementById('import-json')?.value.trim();
+  if (!raw) { alert('Paste a backup first.'); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { alert('That is not valid backup data.'); return; }
+  if (!parsed || typeof parsed !== 'object' || !parsed.categories) { alert('That does not look like a Finance Tracker backup.'); return; }
+  if (!confirm('Replace everything on this phone with this backup?')) return;
+  try { localStorage.setItem(SYNC_BACKUP_KEY, localStorage.getItem(STORAGE_KEY) || ''); } catch {}
+  data = syncNormalize(parsed);
+  saveLocal(data);
+  syncBaseline = null;
+  hideModal();
+  renderAll();
+  if (syncCfg.enabled) syncRun(true);
+  alert('Restored.');
+}
+
+// ══════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════
 function init() {
   data = loadData() || freshData();
   data = migrateData(data);
+  syncBaseline = loadSyncBaseline();
   if (!data.setupComplete) {
     showSetup();
   } else {
@@ -3976,6 +4539,13 @@ function init() {
     data = d;
     if (applied.length) saveData(data);
     renderAll();
+  }
+  if (syncCfg.enabled) {
+    syncStartPolling();
+    syncRun(false);
+    // Coming back to the app should show the other phone's changes right away.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncRun(false); });
+    window.addEventListener('online', () => syncRun(false));
   }
 }
 init();
