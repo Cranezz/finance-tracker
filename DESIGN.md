@@ -124,8 +124,8 @@ Big standalone numbers use proportional figures; columns of numbers use
   (no emoji), labels under each. The active tab gets a pill that slides between
   tabs. Sits above the home indicator.
 - **+ button.** A single floating action button above the tab bar opens an
-  **action sheet**: Log purchase, Scan receipt, Paste receipt, Add paycheck,
-  Deposit, Withdraw. This replaces the three stacked "Log a purchase" buttons
+  **action sheet**: Log purchase, Add paycheck, Deposit, Withdraw.
+  (Receipt scanning was removed in v2026.12.1.) This replaces the three stacked "Log a purchase" buttons
   and the Deposit/Withdraw pair — the biggest decluttering win.
 - **Bottom sheet.** Every form opens in a sheet with a grab handle that slides
   up, and can be swiped down to dismiss.
@@ -171,7 +171,7 @@ Big standalone numbers use proportional figures; columns of numbers use
    calculation are untouched. Only markup-producing code and CSS change.
 2. **Every element ID the script reads stays** — 50 of them (`dash-*`,
    `settings-*`, `analytics-*`, `modal-*`, `header-balance`,
-   `header-checking-amt`, `transfer-*`, `sync-*`, `receipt-file-input`, …).
+   `header-checking-amt`, `transfer-*`, `sync-*`, …).
 3. **Tab panels stay in DOM order 0–4.** `switchTab(n)` indexes by position.
 4. **`switchTab` and `showModal` overwrite `className`** on nav buttons, tab
    panels and the modal overlay — style those only through their base class/ID.

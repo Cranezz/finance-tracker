@@ -214,7 +214,7 @@ c13b8d9 v2026.6.1 — Add bill sinking funds, fix transfer bug, add Analytics   
 
 ---
 
-## 7. Receipt Scanning (pre-existing, untouched this session)
+## 7. Receipt Scanning — REMOVED in v2026.12.1 (kept here for history)
 - Two flows: camera photo and pasted text, both → Claude API.
 - Calls go through a **Cloudflare Worker proxy** at `https://rough-bush-c143.killerclown73242.workers.dev` (avoids CORS; forwards to Anthropic). The user's Anthropic API key is stored in localStorage (`anthropicApiKey`) and sent as `x-api-key`.
 - Model used: `claude-haiku-4-5-20251001`.
@@ -558,6 +558,21 @@ the test rewritten to go offline for real, current code and v10 both pass.
 **Verified:** 393 / 430 / 440-wide screenshots of all 5 tabs in light and dark
 (no horizontal overflow, no console errors), every sheet, all mechanics tests,
 two-phone sync + fuzz (identical on both phones), migration of old data.
+
+## 17. Session v2026.12.1 — Receipt scanning and API key removed
+
+The user asked to remove receipt scanning and "the api key stuff". Gone:
+the camera and paste-receipt flows, the receipt review sheet, the Cloudflare
+Worker calls, the Settings "Receipt scanning" card (`api-key-input`,
+`api-key-status`, `saveApiKey`), the hidden `receipt-file-input`, the
+`i-cam`/`i-paste` icons, `fundScanCategoryLines`, and the related CSS. The +
+sheet now offers Log a purchase, Enter a paycheck, Deposit and Withdraw.
+
+`init()` removes the old `anthropicApiKey` localStorage entry so the key
+doesn't stay on the phone. That entry was never part of `financeData`, which
+is untouched. The `scanHint` field on categories stays in the data (harmless,
+and removing it would mean rewriting stored data). `escHtml` lived between
+the scanner functions and was kept.
 
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*
