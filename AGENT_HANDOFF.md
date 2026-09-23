@@ -482,5 +482,28 @@ the per-paycheck countdowns, and target buckets have no countdown to tick.
 The dashboard card for a target bucket carries a progress bar and reads
 "$3.43/paycheck · $62.54 by Nov 23"; when it is full it reads "Ready".
 
+## 15. Session v2026.11.2 — Years / Months / Weeks / Days for "when"
+
+The user wanted the same free-form timing boxes bills have, instead of a fixed
+"every 2 months" dropdown. One reusable block, `whenBlockHTML(prefix, opts)`,
+now serves both:
+
+- **"Have $X by a date" buckets** (`prefix 'cat-target'`) — a "how long from
+  now" Y/M/W/D row, the exact date, and a "then again every" Y/M/W/D row
+  (all zeros = one-off). Replaces `catRepeatOptions`, which is gone.
+- **Savings targets** (`prefix 'goal-when'`) — same, minus the repeat row.
+
+Typing in "how long from now" computes the date with `addRecurrence` (same
+calendar-month maths as bills) and jumps the calendar to that month; picking the
+date by hand zeroes those boxes so the two can never disagree. The calendar
+marks the due date plus every repeat, and puts a dot under each Friday so the
+user can count paychecks before the date — the whole app is paycheck-driven.
+
+Plumbing: `readDur(id)` returns `{recurYears, recurMonths, recurWeeks,
+recurDays}` — deliberately the same field names as bills, so `recurLabel` and
+`addRecurrence` work on it directly. `whenHooks[prefix]` holds the callback
+(estimate update) that fires on any change. Date input ids are unchanged
+(`cat-target-date`, `goal-due`), so the submit functions barely moved.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*
