@@ -392,5 +392,61 @@ sharing, and both the host setup and joining stash the previous data in
   can't push.
 - Sharing is off by default and `activePersonId` stays device-local.
 
+## 13. Session v2026.11.0 — Flat buckets ARE categories, and Ramsey's paycheck order
+
+### Funds folded into categories
+`data.funds` is gone (left as an empty array for old sync payloads). A flat
+bucket is now just a category with `fundingType: 'flat'` plus `flatAmount`,
+`everyN`, `paychecksUntilNext`, `paidBy`, `totalContributed`. `allKeys()` no
+longer excludes them — only `isGoal` and `archived` are filtered. Every category
+carries its own `key`, so `flatCats(d)` hands back live category objects and
+edits write straight through.
+
+Helpers renamed: `activeFunds`→`flatCats`, `fundBal`→`catBal`, `addToFund`→
+`addToCat`, `fundFreqLabel`→`flatFreqLabel`, `fundMonthlyRate`→`flatMonthlyRate`,
+`fundSpentThisMonth`→`catSpentThisMonth`, `applyFundContributions`→
+`takeFlatContributions`. One Settings card ("Categories") covers both kinds, with
+a percent/flat toggle in the modal; flat rows keep the accent edge the user asked
+to preserve (`.settings-row.flat-row`, `.cat-card.flat-bucket`).
+
+**A flat category holds no percentage** — `submitCategory` zeroes its percents so
+the 100% check stays honest, and the percent editor filters flat ones out.
+
+### Paycheck order now follows Ramsey
+Verified against Ramsey Solutions' own budgeting guidance (giving → saving →
+Four Walls → other essentials → misc → nonessentials), not from memory.
+`buildPaycheckPlan(d, gross, personId, opts)` computes a whole paycheck without
+touching balances, so it can preview or apply, and both paycheck modes use it:
+
+1. **Giving** — any category with `giving: true`, off the top.
+2. **Saving** — savings categories, as a percentage of **GROSS**. This was the
+   user's actual complaint: savings used to be a percentage of the leftovers.
+3. **Four Walls** — bill reserves, flat spending buckets, savings targets.
+4. **What's left** — split among percent-funded spending categories in
+   proportion to their percentages (normalised, since they no longer total 100%
+   of the gross once savings has come out).
+
+If the paycheck cannot cover steps 1–3, **saving gives way** so the necessities
+are covered (Ramsey's rule when money is tight); the amount trimmed is stored as
+`savingsCut` and shown on the breakdown. Anything still short is `shortfall`.
+
+Measured on his real numbers: a $620 paycheck at 70% savings now sends exactly
+$434 to savings (70% of gross) instead of $397.60 (70% of what was left), with
+$55 of necessities and $131 split among the spending buckets — every dollar
+assigned, which is the zero-based part of the method.
+
+### Gotchas
+1. `takeFlatContributions` **ticks the countdowns** and must be called exactly
+   once per paycheck; `previewFlatContributions` is the side-effect-free twin.
+   `processNewPaycheck` calls the committing one and passes the result into
+   `buildPaycheckPlan` via `opts.flat` so it is not computed twice.
+2. `migrateFunds` now runs **after** `migratePeople` (it needs `primaryPersonId`).
+3. Deleting a big block by index range bit me here: the first attempt swallowed
+   `pctLabel`, `goalCardHTML` and `renderGoalTargets` along with `renderFunds`.
+   They were restored from git. Grep for callers after any block delete.
+4. For sync, `totalContributed` stays a delta field (it accumulates) while
+   `flatAmount` must never be one — it is a setting, so it is last-write-wins.
+   The fuzz and two-phone convergence tests were re-run after the refactor.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

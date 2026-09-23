@@ -279,6 +279,7 @@
     /* Flat-amount spending buckets (gas, etc.) — tap to edit */
     .cat-card .cat-sub { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
     .cat-card.flat-bucket { cursor: pointer; border-color: var(--accent)33; }
+    .settings-row.flat-row { border-left: 2px solid var(--accent)55; padding-left: 10px; }
     .bill-status-ready { background: var(--success)22; color: var(--success); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
     .bill-status-ontrack { background: var(--accent)22; color: var(--accent); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
     .bill-status-behind { background: var(--danger)22; color: var(--danger); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
@@ -520,7 +521,7 @@
     <!-- Tab 2: Goals -->
     <div id="tab-2" class="tab-content">
       <div class="dave-note">
-        <strong>Dave Ramsey's advice for your situation:</strong> You have zero living expenses — that's a superpower. Put 70% of every paycheck into savings goals. Hit your emergency fund first, then your wedding, then college. You're building real wealth before most people even start.
+        <strong>How your paycheck gets divided (Ramsey's order):</strong> giving first, then saving — straight off the top, so savings really is the percentage you set. Then the Four Walls: your bills and flat buckets like gas and feed. Whatever's left is split between your spending buckets. If a paycheck can't cover everything, saving gives way so the necessities are covered.
       </div>
       <div class="section-header">
         <div class="section-title">Savings Targets</div>
@@ -583,7 +584,7 @@
       <!-- Categories -->
       <div class="card">
         <div class="card-title">🗂️ Categories</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">Add or remove buckets. A category can belong to one person or to both of you.</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Every bucket lives here — whether it takes a <strong>percentage</strong> of the paycheck or a <strong>flat dollar amount</strong> like gas or chicken feed. A category can belong to one person or to both of you.</div>
         <div id="settings-categories"></div>
         <div class="mt-12">
           <button class="btn btn-secondary" onclick="openAddCategory()">+ Add Category</button>
@@ -609,16 +610,6 @@
         <div id="settings-bills"></div>
         <div class="mt-12">
           <button class="btn btn-secondary" onclick="openAddBill()">+ Add Bill</button>
-        </div>
-      </div>
-
-      <!-- Flat-amount spending buckets management -->
-      <div class="card">
-        <div class="card-title">⛽ Flat-Amount Buckets</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">These sit with your Spending Buckets, but instead of a percentage of your paycheck they take a flat dollar amount. The schedule is counted in <strong>paychecks</strong>, not calendar months: every paycheck, every other paycheck, and so on.</div>
-        <div id="settings-funds"></div>
-        <div class="mt-12">
-          <button class="btn btn-secondary" onclick="openAddFund()">+ Add Bucket</button>
         </div>
       </div>
 
@@ -670,7 +661,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.10.0</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.11.0</div>
         <div class="text-xs text-muted">Last updated Sep 2026</div>
       </div>
     </div>
@@ -757,11 +748,11 @@ function guessCategory(name) {
   const lower = name.toLowerCase();
   // Paycheck funds win over the normal buckets — a gas purchase should come out
   // of the Gas fund, not Misc. Match the fund's own name first, then gas keywords.
-  const funds = activeFunds(data);
-  const byName = funds.find(f => f.label && lower.includes(f.label.toLowerCase()));
+  const buckets = flatCats(data);
+  const byName = buckets.find(c => c.label && lower.includes(c.label.toLowerCase()));
   if (byName) return byName.key;
-  const gasFund = funds.find(f => f.key === 'gas');
-  if (gasFund && GAS_KEYWORDS.some(kw => lower.includes(kw))) return gasFund.key;
+  const gas = buckets.find(c => c.key === 'gas');
+  if (gas && GAS_KEYWORDS.some(kw => lower.includes(kw))) return gas.key;
   for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
     if (data.categories[cat] && !data.categories[cat].archived && keywords.some(kw => lower.includes(kw))) return cat;
   }
@@ -829,8 +820,9 @@ function migrateData(d) {
   });
 
   if (!d.transfers) d.transfers = [];
-  migrateFunds(d);
   migratePeople(d);
+  migrateFunds(d);
+  ensureCategoryKeys(d);
   migrateGoals(d);
   return d;
 }
@@ -854,7 +846,7 @@ function migratePeople(d) {
     if (!cat.percents) {
       // Everything that existed before belongs to the first person's split.
       cat.percents = {};
-      if (!cat.isFund && !cat.isGoal) cat.percents[firstId] = Number(cat.percent) || 0;
+      if (!cat.isGoal) cat.percents[firstId] = Number(cat.percent) || 0;
     }
   });
 
@@ -929,13 +921,13 @@ function personPossessive(id, d) {
 
 // ══════════════════════════════════════════════════
 //  CATEGORY LISTS (computed — categories are user-editable)
-//  Fund and savings-target buckets live in d.categories too, flagged isFund /
-//  isGoal, so every expense path works on them. They are never "categories".
+//  Savings-target buckets live in d.categories too, flagged isGoal, and are not
+//  categories. Flat-amount buckets ARE categories — they just take dollars.
 // ══════════════════════════════════════════════════
 function allKeys(d) {
   const cats = (d || data).categories || {};
   return Object.keys(cats)
-    .filter(k => cats[k] && !cats[k].isFund && !cats[k].isGoal && !cats[k].archived)
+    .filter(k => cats[k] && !cats[k].isGoal && !cats[k].archived)
     .sort((a, b) => (cats[a].order ?? 99) - (cats[b].order ?? 99));
 }
 function savingsKeys(d)  { const c = (d||data).categories; return allKeys(d).filter(k => c[k].type === 'savings'); }
@@ -978,61 +970,186 @@ function paidByMatches(item, personId, d) {
 //  3. Savings categories credited only when transfer checkbox is checked
 //  4. Full gross goes to checking; savings reduce checking when transferred
 // ══════════════════════════════════════════════════
+// Builds the plan for one paycheck WITHOUT touching any balance, so the same
+// code can preview it and apply it. Order follows Dave Ramsey's budgeting
+// sequence: giving, then saving, then the Four Walls (the necessities — bills
+// and the flat buckets like gas and feed), then everything else gets what's
+// left. Savings percentages are taken off the GROSS, so what goes to savings is
+// exactly the share of the paycheck you set.
+function buildPaycheckPlan(d, grossAmount, personId, opts) {
+  opts = opts || {};
+  const percents = resolvePercents(d, personId);
+  const splits = {};
+  allKeys(d).forEach(k => splits[k] = 0);
+
+  // Which flat buckets are due on this paycheck. Committing ticks their
+  // countdowns, so a preview must not commit.
+  const flat = opts.flat || previewFlatContributions(d, personId);
+
+  // ── 1. Giving — off the top, before anything else.
+  let giving = 0;
+  allKeys(d).forEach(k => {
+    const c = d.categories[k];
+    if (!c.giving) return;
+    const amt = isFlat(c)
+      ? (flat.items.find(i => i.key === k)?.amount || 0)
+      : roundCent(grossAmount * ((percents[k] || 0) / 100));
+    splits[k] = amt;
+    giving = roundCent(giving + amt);
+  });
+
+  // ── 2. Saving — a straight percentage of the whole paycheck.
+  let savings = 0;
+  savingsKeys(d).forEach(k => {
+    const c = d.categories[k];
+    if (c.giving) return;
+    const amt = isFlat(c)
+      ? (flat.items.find(i => i.key === k)?.amount || 0)
+      : roundCent(grossAmount * ((percents[k] || 0) / 100));
+    splits[k] = amt;
+    savings = roundCent(savings + amt);
+  });
+
+  // ── 3. The Four Walls — bills and the flat spending buckets.
+  const bills = opts.bills || previewBillContributions(d, personId);
+  const goals = opts.goals || previewGoalContributions(d, personId);
+  const flatSpending = flat.items.filter(i => !i.savings && !d.categories[i.key]?.giving);
+  const flatSpendTotal = roundCent(flatSpending.reduce((s, i) => s + i.amount, 0));
+  const needs = roundCent(bills.total + goals.total + flatSpendTotal);
+
+  // If the paycheck cannot cover giving + saving + necessities, the necessities
+  // win — Ramsey's rule when money is tight — and saving gives way first.
+  let savingsCut = 0;
+  let shortfall = roundCent(giving + savings + needs - grossAmount);
+  if (shortfall > 0 && savings > 0) {
+    savingsCut = Math.min(savings, shortfall);
+    const keep = savings > 0 ? (savings - savingsCut) / savings : 0;
+    savingsKeys(d).forEach(k => { if (!d.categories[k].giving) splits[k] = roundCent(splits[k] * keep); });
+    savings = roundCent(savings - savingsCut);
+    shortfall = roundCent(shortfall - savingsCut);
+  }
+
+  // ── 4. Everything else splits what's left, in proportion to its percentages.
+  const remainder = Math.max(0, roundCent(grossAmount - giving - savings - needs));
+  const restKeys = allKeys(d).filter(k => {
+    const c = d.categories[k];
+    return c.type !== 'savings' && !c.giving && !isFlat(c);
+  });
+  const restPctTotal = restKeys.reduce((s, k) => s + (percents[k] || 0), 0);
+  restKeys.forEach(k => {
+    splits[k] = restPctTotal > 0 ? roundCent(remainder * ((percents[k] || 0) / restPctTotal)) : 0;
+  });
+  // Flat spending buckets get their fixed amount recorded as their split too.
+  flatSpending.forEach(i => splits[i.key] = i.amount);
+
+  return {
+    percents, splits, giving, savings, needs, remainder, savingsCut,
+    shortfall: Math.max(0, shortfall),
+    bills, goals, flat, flatSpendTotal,
+  };
+}
+
+// Preview helpers: work out what each pot wants without committing anything.
+function previewBillContributions(d, personId) {
+  const days = daysSinceLastPaycheck(d);
+  const items = [];
+  let total = 0;
+  (d.bills || []).forEach(bill => {
+    if (!bill.active || !paidByMatches(bill, personId, d)) return;
+    const contrib = roundCent(billPaycheckContribution(bill, days));
+    if (contrib <= 0) return;
+    items.push({ billId: bill.id, amount: contrib });
+    total = roundCent(total + contrib);
+  });
+  return { total, items };
+}
+
+function previewGoalContributions(d, personId) {
+  const items = [];
+  let total = 0;
+  activeGoals(d).forEach(g => {
+    if (!paidByMatches(g, personId, d)) return;
+    const contrib = Math.min(goalPerPaycheck(d, g), goalRemaining(d, g));
+    if (contrib <= 0) return;
+    items.push({ goalId: g.id, key: g.key, amount: roundCent(contrib) });
+    total = roundCent(total + contrib);
+  });
+  return { total, items };
+}
+
+// Same as takeFlatContributions but leaves the countdowns alone.
+function previewFlatContributions(d, personId) {
+  const items = [];
+  let total = 0;
+  flatCats(d).forEach(c => {
+    if (personId && !paidByMatches(c, personId, d)) return;
+    if ((c.paychecksUntilNext || 0) > 0) return;
+    const amt = roundCent(c.flatAmount || 0);
+    if (amt <= 0) return;
+    items.push({ key: c.key, amount: amt, savings: c.type === 'savings' });
+    total = roundCent(total + amt);
+  });
+  return { total, items };
+}
+
 function processNewPaycheck(d, grossAmount, personId) {
   personId = personId || primaryPersonId(d);
 
-  // Step 1: accumulate bill reserve contributions (only bills this person pays)
-  const days = daysSinceLastPaycheck(d);
-  let billContributionsTotal = 0;
-  (d.bills || []).forEach(bill => {
-    if (!bill.active || !paidByMatches(bill, personId, d)) return;
-    const contrib = billPaycheckContribution(bill, days);
-    // Cap at bill.amount so we never over-reserve
-    bill.reserveBalance = Math.min(bill.amount, roundCent((bill.reserveBalance || 0) + contrib));
-    billContributionsTotal = roundCent(billContributionsTotal + contrib);
+  // Commit the flat buckets first — this is the call that ticks their
+  // countdowns — then plan around what it produced.
+  const flat = takeFlatContributions(d, personId);
+  const plan = buildPaycheckPlan(d, grossAmount, personId, { flat });
+
+  // Bills: move the planned amount into each reserve.
+  plan.bills.items.forEach(it => {
+    const bill = (d.bills || []).find(b => b.id === it.billId);
+    if (!bill) return;
+    bill.reserveBalance = Math.min(bill.amount, roundCent((bill.reserveBalance || 0) + it.amount));
   });
 
-  // Step 1b: flat-dollar fund set-asides (gas, etc.) also come off the top
-  const fundContribs = applyFundContributions(d, personId);
+  // Savings targets: same idea.
+  plan.goals.items.forEach(it => {
+    const g = (d.goals || []).find(x => x.id === it.goalId);
+    if (g) addToGoal(d, g, it.amount);
+  });
 
-  // Step 1c: savings targets (the $300 phone) take their slice off the top too
-  const goalContribs = applyGoalContributions(d, personId);
-
-  // Step 2: split the remaining amount by THIS person's category percentages
-  const remaining = Math.max(0, roundCent(grossAmount - billContributionsTotal - fundContribs.total - goalContribs.total));
-  const percents = resolvePercents(d, personId);
-  const splits = {};
-
+  // Credit the buckets. Spending money sits in checking; savings waits for the
+  // transfer checkbox, exactly as before.
   allKeys(d).forEach(k => {
-    const alloc = roundCent(remaining * ((percents[k] || 0) / 100));
-    splits[k] = alloc;
-    // Spending categories added immediately (stay in checking physically)
-    if (d.categories[k].type === 'spending') {
-      d.categories[k].balance = roundCent((d.categories[k].balance || 0) + alloc);
+    const c = d.categories[k];
+    if (c.type === 'spending' && splitsOf(plan, k) !== 0) {
+      c.balance = roundCent((c.balance || 0) + splitsOf(plan, k));
     }
-    // Savings categories are NOT added yet — only added when the transfer checkbox is checked
   });
-
-  const celebrations = [];
+  flat.items.forEach(it => {
+    const c = d.categories[it.key];
+    if (c) c.totalContributed = roundCent((c.totalContributed || 0) + it.amount);
+  });
 
   const pid = uid();
-  d.paychecks.unshift({ id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount, splits, percents, billContributionsTotal,
-    fundContributionsTotal: fundContribs.total, fundContributions: fundContribs.items,
-    goalContributionsTotal: goalContribs.total, goalContributions: goalContribs.items });
+  d.paychecks.unshift({
+    id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount,
+    splits: plan.splits, percents: plan.percents,
+    billContributionsTotal: plan.bills.total,
+    fundContributionsTotal: plan.flat.total, fundContributions: plan.flat.items,
+    goalContributionsTotal: plan.goals.total, goalContributions: plan.goals.items,
+    givingTotal: plan.giving, savingsTotal: plan.savings, needsTotal: plan.needs,
+    savingsCut: plan.savingsCut, shortfall: plan.shortfall, order: 'ramsey',
+  });
 
   // Transfer checklist (v2: toggling actually moves money between checking and savings)
-  const transferItems = savingsKeys(d).filter(k => (splits[k] || 0) > 0).map(k => ({
-    key: k,
-    amount: splits[k],
-    checked: false,
+  const transferItems = savingsKeys(d).filter(k => (plan.splits[k] || 0) > 0).map(k => ({
+    key: k, amount: plan.splits[k], checked: false,
   }));
   d.transfers.unshift({ paycheckId: pid, items: transferItems, v2: true });
 
-  // Full gross deposited to checking; savings will reduce it as transfers are checked
+  // Full gross deposited to checking; savings reduce it as transfers are checked
   d.checkingBalance = roundCent((d.checkingBalance || 0) + grossAmount);
 
-  return { d, celebrations };
+  return { d, celebrations: [], plan };
 }
+
+function splitsOf(plan, k) { return plan.splits[k] || 0; }
 
 function logExpense(d, categoryKey, amount, note) {
   d.categories[categoryKey].balance = roundCent(d.categories[categoryKey].balance - amount);
@@ -1402,143 +1519,157 @@ function processDueBills(d) {
 // ══════════════════════════════════════════════════
 const PAYCHECKS_PER_MONTH = 52 / 12; // user is paid weekly (Fridays)
 
-// Every fund needs a matching pseudo-category so expenses can point at it.
-// Idempotent — safe to call on every load and after any fund edit.
-function ensureFundCategories(d) {
-  (d.funds || []).forEach(f => {
-    const existing = d.categories[f.key];
-    if (existing) {
-      existing.label = f.label;
-      existing.icon = f.icon;
-      existing.isFund = true;
-      existing.fundId = f.id;
-      existing.type = 'spending'; // 'spending' ⇒ purchases also come out of checking
-      return;
+// Every category carries its own key so a flat bucket can be passed around as
+// one object. Idempotent.
+function ensureCategoryKeys(d) {
+  Object.keys(d.categories || {}).forEach(k => {
+    const c = d.categories[k];
+    if (c.key !== k) c.key = k;
+    if (!c.fundingType) c.fundingType = 'percent';
+    if (c.fundingType === 'flat') {
+      if (c.flatAmount === undefined) c.flatAmount = 0;
+      if (c.everyN === undefined) c.everyN = 1;
+      if (c.paychecksUntilNext === undefined) c.paychecksUntilNext = 0;
+      if (c.totalContributed === undefined) c.totalContributed = 0;
+      if (!c.paidBy) c.paidBy = primaryPersonId(d);
     }
-    d.categories[f.key] = {
-      label: f.label, balance: 0, goal: null, percent: 0, goalMet: false,
-      redirectTo: null, icon: f.icon, type: 'spending', isFund: true, fundId: f.id,
-    };
   });
 }
 
+// v2026.11.0 folded the separate "funds" list into categories: a flat bucket is
+// just a category funded by dollars instead of a percentage. Runs once.
 function migrateFunds(d) {
   if (!d.funds) d.funds = [];
-  d.funds.forEach(f => {
-    if (f.everyN === undefined) f.everyN = 1;
-    if (f.paychecksUntilNext === undefined) f.paychecksUntilNext = 0;
-    if (f.active === undefined) f.active = true;
-    if (!f.icon) f.icon = '💰';
-    if (f.totalContributed === undefined) f.totalContributed = 0;
-    // The old "transfer out" kind is gone — any fund made with it keeps its money
-    // and simply becomes a normal set-aside fund.
-    delete f.kind;
-  });
 
-  // One-time seed of the Gas fund the app now ships with. Guarded by a flag so a
-  // deleted Gas fund never comes back, and so nothing is ever overwritten.
+  d.funds.forEach(f => {
+    const cat = d.categories[f.key] || (d.categories[f.key] = {
+      label: f.label, balance: 0, goal: null, goalMet: false, redirectTo: null,
+      icon: f.icon, type: 'spending', percents: {},
+    });
+    cat.key = f.key;
+    cat.label = f.label;
+    cat.icon = f.icon || cat.icon || '💰';
+    cat.type = cat.type || 'spending';
+    cat.fundingType = 'flat';
+    if (cat.flatAmount === undefined) cat.flatAmount = Number(f.amount) || 0;
+    if (cat.everyN === undefined) cat.everyN = Math.max(1, f.everyN || 1);
+    if (cat.paychecksUntilNext === undefined) cat.paychecksUntilNext = f.paychecksUntilNext || 0;
+    if (cat.totalContributed === undefined) cat.totalContributed = f.totalContributed || 0;
+    if (!cat.paidBy) cat.paidBy = f.paidBy || primaryPersonId(d);
+    if (f.scanHint && !cat.scanHint) cat.scanHint = f.scanHint;
+    if (cat.archived === undefined) cat.archived = !f.active;
+    delete cat.isFund;
+    delete cat.fundId;
+  });
+  d.funds = [];
+
+  // One-time seed of the Gas bucket. Guarded so a deleted one never comes back.
   if (!d.fundsSeeded) {
     d.fundsSeeded = true;
-    if (!d.funds.some(f => f.key === 'gas')) {
-      d.funds.push({
-        id: uid(), key: 'gas', label: 'Gas', icon: '⛽',
-        amount: 25, everyN: 1, paychecksUntilNext: 0,
-        active: true, totalContributed: 0,
-        scanHint: 'gas station, fuel, filling up the tank',
-      });
+    if (!d.categories.gas) {
+      d.categories.gas = {
+        key: 'gas', label: 'Gas', icon: '⛽', type: 'spending', fundingType: 'flat',
+        flatAmount: 25, everyN: 1, paychecksUntilNext: 0, totalContributed: 0,
+        balance: 0, goal: null, goalMet: false, redirectTo: null, percents: {},
+        archived: false, order: 20, scanHint: 'gas station, fuel, filling up the tank',
+      };
     }
   }
 
-  ensureFundCategories(d);
+  ensureCategoryKeys(d);
   return d;
 }
 
-function activeFunds(d) { return (d.funds || []).filter(f => f.active); }
-function fundBal(d, f)  { return roundCent(d.categories[f.key]?.balance || 0); }
-
-function addToFund(d, f, amt) {
-  if (!d.categories[f.key]) ensureFundCategories(d);
-  d.categories[f.key].balance = roundCent((d.categories[f.key].balance || 0) + amt);
+// ── Flat-amount categories (gas, chicken feed…) ───────────────────────────
+// Same objects as any other category — they just take dollars instead of a
+// percentage. Returned live, so edits write straight through.
+function flatCats(d) {
+  const cats = (d || data).categories;
+  return allKeys(d).filter(k => cats[k].fundingType === 'flat').map(k => cats[k]);
+}
+function percentCats(d) {
+  const cats = (d || data).categories;
+  return allKeys(d).filter(k => cats[k].fundingType !== 'flat').map(k => cats[k]);
+}
+function isFlat(cat) { return cat && cat.fundingType === 'flat'; }
+function catBal(d, c) { return roundCent(d.categories[c.key]?.balance || 0); }
+function addToCat(d, c, amt) {
+  if (!d.categories[c.key]) return;
+  d.categories[c.key].balance = roundCent((d.categories[c.key].balance || 0) + amt);
 }
 
-// Sum of every flat-amount bucket, for the Spending Buckets total.
-function totalFundBalances(d) {
-  return roundCent(activeFunds(d).reduce((s, f) => s + fundBal(d, f), 0));
+// Sum of the flat SPENDING buckets, for the Spending Buckets total.
+function totalFlatBalances(d) {
+  return roundCent(flatCats(d).filter(c => c.type !== 'savings').reduce((s, c) => s + catBal(d, c), 0));
 }
 
-function fundFreqLabel(f) {
-  const n = Math.max(1, f.everyN || 1);
+function flatFreqLabel(c) {
+  const n = Math.max(1, c.everyN || 1);
   if (n === 1) return 'Every paycheck';
   if (n === 2) return 'Every other paycheck';
   return `Every ${ordinal(n)} paycheck`;
 }
 
-function fundNextLabel(f) {
-  const left = f.paychecksUntilNext || 0;
+function flatNextLabel(c) {
+  const left = c.paychecksUntilNext || 0;
   if (left <= 0) return 'Comes out of your next paycheck';
   return `Skipping the next ${left === 1 ? 'paycheck' : left + ' paychecks'} — comes out after that`;
 }
 
-// Roughly what this fund costs per month, for sanity-checking against real spending.
-function fundMonthlyRate(f) {
-  return roundCent((f.amount || 0) * (PAYCHECKS_PER_MONTH / Math.max(1, f.everyN || 1)));
+function flatMonthlyRate(c) {
+  return roundCent((c.flatAmount || 0) * (PAYCHECKS_PER_MONTH / Math.max(1, c.everyN || 1)));
 }
 
-// Extra category lines handed to the receipt scanner so a fill-up lands in the
-// Gas fund instead of Misc. Returns '' when there are no spendable funds.
+// Extra category lines for the receipt scanner, so a fill-up lands in Gas.
 function fundScanCategoryLines() {
-  return activeFunds(data).map(f => `\n- ${f.key} (${f.scanHint || f.label.toLowerCase()})`).join('');
+  return flatCats(data).map(c => `\n- ${c.key} (${c.scanHint || c.label.toLowerCase()})`).join('');
 }
 
-function fundSpentThisMonth(d, f) {
+function catSpentThisMonth(d, c) {
   const ym = todayISO().slice(0, 7);
   return roundCent((d.expenses || [])
-    .filter(e => e.category === f.key && (e.date || '').startsWith(ym))
+    .filter(e => e.category === c.key && (e.date || '').startsWith(ym))
     .reduce((s, e) => s + e.amount, 0));
 }
 
-// Runs once per real paycheck: each active fund either contributes its fixed
-// amount (and restarts its countdown) or ticks one paycheck closer to its turn.
-function applyFundContributions(d, personId) {
+// What each flat bucket wants out of THIS paycheck. Ticks the countdown, so it
+// is called exactly once per paycheck.
+function takeFlatContributions(d, personId) {
   const items = [];
   let total = 0;
-  activeFunds(d).forEach(f => {
-    // Only tick down / contribute on the paycheck this bucket is paid from,
-    // otherwise two earners would fund it twice a week.
-    if (personId && !paidByMatches(f, personId, d)) return;
-    const everyN = Math.max(1, f.everyN || 1);
-    if ((f.paychecksUntilNext || 0) > 0) { f.paychecksUntilNext--; return; }
-    const amt = roundCent(f.amount || 0);
-    f.paychecksUntilNext = everyN - 1;
+  flatCats(d).forEach(c => {
+    // Only the paycheck this bucket is paid from, or two earners fund it twice.
+    if (personId && !paidByMatches(c, personId, d)) return;
+    const everyN = Math.max(1, c.everyN || 1);
+    if ((c.paychecksUntilNext || 0) > 0) { c.paychecksUntilNext--; return; }
+    const amt = roundCent(c.flatAmount || 0);
+    c.paychecksUntilNext = everyN - 1;
     if (amt <= 0) return;
-    addToFund(d, f, amt);
-    f.totalContributed = roundCent((f.totalContributed || 0) + amt);
-    items.push({ fundId: f.id, key: f.key, amount: amt });
+    items.push({ key: c.key, amount: amt, savings: c.type === 'savings' });
     total = roundCent(total + amt);
   });
   return { total, items };
 }
 
-// Undo the fund set-asides a paycheck made (used when a paycheck is deleted).
-// Amounts are reversed exactly from what was recorded on the paycheck; the
-// countdown can only be restored precisely for the most recent paycheck.
+// Undo the flat set-asides a paycheck made (used when a paycheck is deleted).
 function reverseFundContributions(d, paycheck, isLatest) {
   const items = paycheck.fundContributions || [];
   items.forEach(it => {
-    const f = (d.funds || []).find(x => x.id === it.fundId);
-    if (!f) return;
-    addToFund(d, f, -it.amount);
-    f.totalContributed = Math.max(0, roundCent((f.totalContributed || 0) - it.amount));
-    if (isLatest) f.paychecksUntilNext = 0;
+    const c = d.categories[it.key];
+    if (!c) return;
+    // Savings buckets were only credited if the transfer was checked off, and
+    // that reversal is handled with the other transfers.
+    if (c.type !== 'savings') addToCat(d, c, -it.amount);
+    c.totalContributed = Math.max(0, roundCent((c.totalContributed || 0) - it.amount));
+    if (isLatest) c.paychecksUntilNext = 0;
   });
   if (!isLatest) return;
-  // Funds that merely ticked down on this paycheck tick back up.
   const payer = paycheck.personId || primaryPersonId(d);
-  activeFunds(d).forEach(f => {
-    if (!paidByMatches(f, payer, d)) return;
-    if (items.some(it => it.fundId === f.id)) return;
-    const everyN = Math.max(1, f.everyN || 1);
-    f.paychecksUntilNext = Math.min(everyN - 1, (f.paychecksUntilNext || 0) + 1);
+  flatCats(d).forEach(c => {
+    if (!paidByMatches(c, payer, d)) return;
+    if (items.some(it => it.key === c.key)) return;
+    const everyN = Math.max(1, c.everyN || 1);
+    c.paychecksUntilNext = Math.min(everyN - 1, (c.paychecksUntilNext || 0) + 1);
   });
 }
 
@@ -1558,7 +1689,6 @@ function renderAll() {
   renderGoals();
   renderSettings();
   renderBills();
-  renderFunds();
   renderGoalTargets();
   if (activeTab === 4) renderAnalytics();
 }
@@ -1614,7 +1744,7 @@ function renderDashboard() {
   }).join('');
 
   // Spending grid — percentage buckets first, then flat-amount buckets (gas)
-  const pctCards = spendingKeys().map(k => {
+  const pctCards = spendingKeys().filter(k => !isFlat(data.categories[k])).map(k => {
     const cat = data.categories[k];
     const bal = cat.balance;
     const isNeg = bal < 0;
@@ -1623,26 +1753,24 @@ function renderDashboard() {
       <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
     </div>`;
   });
-  const flatCards = activeFunds(data).map(f => {
-    const bal = fundBal(data, f);
+  const flatCards = flatCats(data).filter(c => c.type !== 'savings').map(c => {
+    const bal = catBal(data, c);
     const isNeg = bal < 0;
-    return `<div class="cat-card flat-bucket" onclick="openEditFund('${f.id}')">
-      <div class="cat-label">${f.icon} ${escHtml(f.label)}</div>
+    return `<div class="cat-card flat-bucket" onclick="openEditCategory('${c.key}')">
+      <div class="cat-label">${c.icon} ${escHtml(c.label)}</div>
       <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
-      <div class="cat-sub">${fmt(f.amount)} ${fundFreqLabel(f).toLowerCase()}</div>
+      <div class="cat-sub">${fmt(c.flatAmount)} ${flatFreqLabel(c).toLowerCase()}</div>
     </div>`;
   });
   document.getElementById('dash-spending').innerHTML = pctCards.concat(flatCards).join('');
 
   // Spending total
-  const spendTotal = roundCent(spendingKeys().reduce((s,k) => s + (data.categories[k]?.balance||0), 0) + totalFundBalances(data));
+  const spendTotal = roundCent(spendingKeys().reduce((s,k) => s + (data.categories[k]?.balance||0), 0));
   const stEl = document.getElementById('spending-total');
   stEl.textContent = fmt(spendTotal);
   stEl.style.color = spendTotal < 0 ? 'var(--danger)' : 'var(--success)';
 
-  // Bills + paycheck funds
   renderBills();
-  renderFunds();
 
   // Recent expenses
   const expList = document.getElementById('dash-expenses');
@@ -1705,39 +1833,54 @@ function renderPaychecks() {
   const bContent = document.getElementById('paycheck-breakdown-content');
   if (lastP) {
     bCard.style.display = '';
-    // Only rows this paycheck actually fed (a person's split skips the other's buckets)
-    const rows = allKeys().filter(k => (lastP.percents[k]||0) > 0 || (lastP.splits[k]||0) !== 0).map(k => {
-      const cat = data.categories[k];
-      return `<tr>
-        <td>${cat.icon} ${escHtml(cat.label)}</td>
-        <td>${lastP.percents[k]||0}%</td>
-        <td>${fmt(lastP.splits[k]||0)}</td>
-      </tr>`;
-    }).join('');
+    // Shown in the order the money was actually assigned: giving, saving, the
+    // Four Walls, then what was left over.
+    const row = (icon, label, pct, amt, color) => `<tr>
+      <td${color?` style="color:${color}"`:''}>${icon} ${escHtml(label)}</td>
+      <td>${pct || ''}</td>
+      <td${color?` style="color:${color}"`:''}>${amt}</td>
+    </tr>`;
+    const head = (text) => `<tr><td colspan="3" style="text-align:left;padding-top:12px;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted)">${text}</td></tr>`;
+
+    const givingKeys = allKeys().filter(k => data.categories[k].giving && (lastP.splits[k]||0) !== 0);
+    const savingKeys = savingsKeys().filter(k => !data.categories[k].giving && (lastP.splits[k]||0) !== 0);
+    const restKeys = allKeys().filter(k => {
+      const c = data.categories[k];
+      return c.type !== 'savings' && !c.giving && !isFlat(c) && ((lastP.percents[k]||0) > 0 || (lastP.splits[k]||0) !== 0);
+    });
+
     const billContribTotal = roundCent(lastP.billContributionsTotal || 0);
-    const fundContribTotal = roundCent(lastP.fundContributionsTotal || 0);
-    const goalContribTotal = roundCent(lastP.goalContributionsTotal || 0);
-    const remainingAfterBills = roundCent(lastP.grossAmount - billContribTotal - fundContribTotal - goalContribTotal);
-    const billContribLine = `<tr>
-      <td style="color:var(--warning)">💸 Bill Reserves</td>
-      <td></td>
-      <td style="color:var(--warning)">${billContribTotal > 0 ? '-' : ''}${fmt(billContribTotal)}</td>
-    </tr>` + (lastP.goalContributions || []).map(gc => `<tr>
-      <td style="color:var(--warning)">${data.categories[gc.key]?.icon || '🎯'} ${escHtml(data.categories[gc.key]?.label || 'Target')}</td>
-      <td></td>
-      <td style="color:var(--warning)">-${fmt(gc.amount)}</td>
-    </tr>`).join('') + (lastP.fundContributions || []).map(fc => `<tr>
-      <td style="color:var(--warning)">${data.categories[fc.key]?.icon || '💰'} ${escHtml(data.categories[fc.key]?.label || 'Bucket')}</td>
-      <td></td>
-      <td style="color:var(--warning)">-${fmt(fc.amount)}</td>
-    </tr>`).join('');
+    const goalRows = (lastP.goalContributions || []);
+    const flatRows = (lastP.fundContributions || []).filter(fc => !data.categories[fc.key]?.giving && data.categories[fc.key]?.type !== 'savings');
+    const needsTotal = roundCent(billContribTotal + goalRows.reduce((a,b)=>a+b.amount,0) + flatRows.reduce((a,b)=>a+b.amount,0));
+    const leftOver = roundCent(lastP.grossAmount - (lastP.givingTotal||0) - (lastP.savingsTotal||0) - needsTotal);
+
+    let body = '';
+    if (givingKeys.length) body += head('1 · Giving') +
+      givingKeys.map(k => row(data.categories[k].icon, data.categories[k].label, '', fmt(lastP.splits[k]), 'var(--accent)')).join('');
+    if (savingKeys.length) body += head(givingKeys.length ? '2 · Saving' : '1 · Saving') +
+      savingKeys.map(k => row(data.categories[k].icon, data.categories[k].label, (lastP.percents[k]||0)+'%', fmt(lastP.splits[k]), 'var(--success)')).join('');
+    if (needsTotal > 0) {
+      body += head('The Four Walls — bills & flat buckets');
+      if (billContribTotal > 0) body += row('💸', 'Bill Reserves', '', '-'+fmt(billContribTotal), 'var(--warning)');
+      body += flatRows.map(fc => row(data.categories[fc.key]?.icon || '💰', data.categories[fc.key]?.label || 'Bucket', '', '-'+fmt(fc.amount), 'var(--warning)')).join('');
+      body += goalRows.map(gc => row(data.categories[gc.key]?.icon || '🎯', data.categories[gc.key]?.label || 'Target', '', '-'+fmt(gc.amount), 'var(--warning)')).join('');
+    }
+    if (restKeys.length) body += head('What was left') +
+      restKeys.map(k => row(data.categories[k].icon, data.categories[k].label, (lastP.percents[k]||0)+'%', fmt(lastP.splits[k]))).join('');
+
+    const notes = [];
+    if (lastP.savingsCut > 0) notes.push(`⚠️ Saving was trimmed by ${fmt(lastP.savingsCut)} so the necessities were covered first.`);
+    if (lastP.shortfall > 0) notes.push(`⚠️ This paycheck was ${fmt(lastP.shortfall)} short of the plan.`);
+
     bContent.innerHTML = `
       <div style="margin-bottom:12px">
         <div style="font-size:20px;font-weight:800">${fmt(lastP.grossAmount)}</div>
         <div class="text-sm text-muted">${fmtDate(lastP.date)}${people(data).length>1 ? ' · ' + personChip(lastP.personId || primaryPersonId(data)) : ''}</div>
-        <div class="text-xs text-muted" style="margin-top:4px">${fmt(remainingAfterBills)} split by % after bill reserves &amp; flat buckets</div>
+        <div class="text-xs text-muted" style="margin-top:4px">${fmt(leftOver)} left for the spending buckets after giving, saving and necessities</div>
       </div>
-      <table class="split-table">${billContribLine}${rows}</table>`;
+      <table class="split-table">${body}</table>
+      ${notes.map(n => `<div class="text-sm" style="color:var(--warning);margin-top:10px">${n}</div>`).join('')}`;
   } else {
     bCard.style.display = 'none';
   }
@@ -1783,7 +1926,7 @@ function renderGoals() {
     </div>`;
   }).join('');
 
-  const pctBudgets = spendingKeys().map(k => {
+  const pctBudgets = spendingKeys().filter(k => !isFlat(data.categories[k])).map(k => {
     const cat = data.categories[k];
     const lastP = data.paychecks[0];
     const weekly = lastP ? (lastP.splits[k]||0) : 0;
@@ -1801,18 +1944,18 @@ function renderGoals() {
   });
 
   // Flat-amount buckets sit in the same list, funded by dollars instead of a %
-  const flatBudgets = activeFunds(data).map(f => {
-    const bal = fundBal(data, f);
+  const flatBudgets = flatCats(data).filter(c => c.type !== 'savings').map(c => {
+    const bal = catBal(data, c);
     const isNeg = bal < 0;
-    return `<div class="card" style="margin-bottom:10px" onclick="openEditFund('${f.id}')">
+    return `<div class="card" style="margin-bottom:10px" onclick="openEditCategory('${c.key}')">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:15px;font-weight:700">${f.icon} ${escHtml(f.label)}</div>
-          <div class="text-sm text-muted">${fmt(f.amount)} ${fundFreqLabel(f).toLowerCase()} · about ${fmt(fundMonthlyRate(f))}/mo</div>
+          <div style="font-size:15px;font-weight:700">${c.icon} ${escHtml(c.label)}</div>
+          <div class="text-sm text-muted">${fmt(c.flatAmount)} ${flatFreqLabel(c).toLowerCase()} · about ${fmt(flatMonthlyRate(c))}/mo</div>
         </div>
         <div style="font-size:22px;font-weight:800;color:${isNeg?'var(--danger)':'var(--success)'}">${fmt(bal)}</div>
       </div>
-      <div class="text-sm text-muted" style="margin-top:6px">${fundNextLabel(f)} · ${fmt(fundSpentThisMonth(data, f))} spent this month</div>
+      <div class="text-sm text-muted" style="margin-top:6px">${flatNextLabel(c)} · ${fmt(catSpentThisMonth(data, c))} spent this month</div>
       ${isNeg?'<div class="text-sm text-danger" style="margin-top:6px">⚠️ Over budget — this carries forward</div>':''}
     </div>`;
   });
@@ -1890,27 +2033,10 @@ function renderBills() {
   }
 }
 
-// ── Flat-amount buckets (settings list; the buckets themselves render in the
-//    dashboard's Spending Buckets grid alongside the percentage ones) ─────────
-function renderFunds() {
-  const funds = data.funds || [];
-  const settingsEl = document.getElementById('settings-funds');
-  if (!settingsEl) return;
-  if (!funds.length) {
-    settingsEl.innerHTML = '<div class="empty-state">No flat-amount buckets yet</div>';
-    return;
-  }
-  settingsEl.innerHTML = funds.map(f => `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
-    <div class="sr-label" style="flex:1;min-width:0">
-      <div style="font-weight:700">${f.icon} ${escHtml(f.label)}</div>
-      <div style="font-size:12px;color:var(--text-muted)">${fmt(f.amount)} · ${fundFreqLabel(f).toLowerCase()} · about ${fmt(fundMonthlyRate(f))}/mo · ${fmt(fundBal(data, f))} in the bucket${f.active ? '' : ' · <span style="color:var(--danger)">inactive</span>'}</div>
-    </div>
-    <button class="btn btn-secondary btn-sm" onclick="openEditFund('${f.id}')" style="padding:6px 10px;font-size:13px">Edit</button>
-  </div>`).join('');
-}
-
-// "25%" with one earner, "🧑25% · 💜10%" with two.
+// "25%" with one earner, "🧑25% · 💜10%" with two, or the dollar amount for a
+// flat bucket.
 function pctLabel(cat) {
+  if (isFlat(cat)) return `${fmt(cat.flatAmount || 0)} ${flatFreqLabel(cat).toLowerCase()}`;
   const ppl = people(data);
   if (ppl.length <= 1) return `${catPercent(cat, ppl[0]?.id || primaryPersonId(data))}%`;
   return ppl.filter(p => catVisibleTo(cat, p.id)).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
@@ -2042,7 +2168,7 @@ function renderPctSettings() {
     ${ppl.map(p => `<button class="person-pick${p.id===pid?' active':''}" onclick="selectSettingsPerson('${p.id}')">${p.icon} ${escHtml(p.name)}</button>`).join('')}
   </div>` : '';
 
-  const keys = keysForPerson(pid, data);
+  const keys = keysForPerson(pid, data).filter(k => !isFlat(data.categories[k]));
   const rows = keys.map(k => {
     const cat = data.categories[k];
     const ownerTag = cat.owner && cat.owner !== 'shared' ? ` <span class="text-xs text-muted">${personChip(cat.owner)}</span>` : '';
@@ -2064,11 +2190,13 @@ function renderCategorySettings() {
   el.innerHTML = keys.map(k => {
     const cat = data.categories[k];
     const who = !cat.owner || cat.owner === 'shared' ? '👥 Both' : personChip(cat.owner);
-    const pcts = people(data).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
-    return `<div class="settings-row" style="flex-wrap:wrap;gap:8px">
+    const funding = isFlat(cat)
+      ? `<span style="color:var(--accent)">${fmt(cat.flatAmount || 0)} ${flatFreqLabel(cat).toLowerCase()}</span>`
+      : people(data).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
+    return `<div class="settings-row${isFlat(cat) ? ' flat-row' : ''}" style="flex-wrap:wrap;gap:8px">
       <div class="sr-label" style="flex:1;min-width:0">
-        <div style="font-weight:700">${cat.icon} ${escHtml(cat.label)}</div>
-        <div style="font-size:12px;color:var(--text-muted)">${cat.type === 'savings' ? '🔒 Savings' : 'Spending'} · ${who} · ${pcts}</div>
+        <div style="font-weight:700">${cat.icon} ${escHtml(cat.label)}${cat.giving ? ' <span class="text-xs text-muted">giving</span>' : ''}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${cat.type === 'savings' ? '🔒 Savings' : 'Spending'} · ${who} · ${funding}</div>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="openEditCategory('${k}')" style="padding:6px 10px;font-size:13px">Edit</button>
     </div>`;
@@ -2105,7 +2233,7 @@ function handleModalBg(e) { if (e.target===document.getElementById('modal-overla
 // fund (deleted fund with history) is still included when it's the current
 // selection, so editing an old purchase can't silently re-categorize it.
 function catOptions(selectedKey) {
-  const keys = allKeys().concat(activeFunds(data).map(f => f.key));
+  const keys = allKeys();
   if (selectedKey && !keys.includes(selectedKey) && data.categories[selectedKey]) keys.push(selectedKey);
   return keys.map(k => {
     const c = data.categories[k];
@@ -2168,19 +2296,22 @@ function submitPaycheck(mode) {
   data.activePersonId = personId;
 
   if (mode === 'nobalances') {
-    // "Already Deposited" — money is already in bank. Only credit spending categories.
-    // No bill reserve contributions, no checking change, no savings change.
-    const percents = resolvePercents(data, personId);
-    const splits = {};
+    // "Already Deposited" — the money is already in the bank. Credit the spending
+    // buckets only: no checking change, no reserves, no savings transfers. The
+    // split still follows the same order so the numbers match a normal paycheck.
+    const plan = buildPaycheckPlan(data, gross, personId, {
+      bills: { total: 0, items: [] }, goals: { total: 0, items: [] },
+      flat: { total: 0, items: [] },
+    });
     allKeys(data).forEach(k => {
-      const alloc = roundCent(gross * ((percents[k] || 0) / 100));
-      splits[k] = alloc;
       if (data.categories[k].type === 'spending') {
-        data.categories[k].balance = roundCent((data.categories[k].balance || 0) + alloc);
+        data.categories[k].balance = roundCent((data.categories[k].balance || 0) + (plan.splits[k] || 0));
       }
     });
     const pid = uid();
-    data.paychecks.unshift({ id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount: gross, splits, percents, mode: 'nobalances' });
+    data.paychecks.unshift({ id: pid, date: todayISO(), createdAt: Date.now(), personId, grossAmount: gross,
+      splits: plan.splits, percents: plan.percents, mode: 'nobalances', order: 'ramsey',
+      givingTotal: plan.giving, savingsTotal: plan.savings });
     saveData(data);
     hideModal();
     renderAll();
@@ -2461,16 +2592,13 @@ function deleteExpense(idx) {
 function adjustAccountOptions() {
   const spend = spendingKeys(data);
   const save  = savingsKeys(data);
-  const funds = activeFunds(data);
   const goals = activeGoals(data);
   return `
     <option value="">💳 Checking only</option>
     ${spend.length ? `<optgroup label="Spending Buckets">
       ${spend.map(k => `<option value="${k}">${data.categories[k].icon} ${escHtml(data.categories[k].label)}</option>`).join('')}
     </optgroup>` : ''}
-    ${funds.length ? `<optgroup label="Flat-Amount Buckets">
-      ${funds.map(f => `<option value="${f.key}">${f.icon} ${escHtml(f.label)}</option>`).join('')}
-    </optgroup>` : ''}
+
     ${goals.length ? `<optgroup label="Savings Targets">
       ${goals.map(g => `<option value="${g.key}">${g.icon} ${escHtml(g.label)}</option>`).join('')}
     </optgroup>` : ''}
@@ -3147,143 +3275,6 @@ function resetBillDueDate(id) {
 }
 
 // ══════════════════════════════════════════════════
-//  PAYCHECK FUND MODALS
-// ══════════════════════════════════════════════════
-function fundFreqOptions(selected) {
-  return [1,2,3,4,5,6,8,10,12].map(n => {
-    const label = n === 1 ? 'Every paycheck' : n === 2 ? 'Every other paycheck' : `Every ${ordinal(n)} paycheck`;
-    return `<option value="${n}"${n===selected?' selected':''}>${label}</option>`;
-  }).join('');
-}
-
-function updateFundEstimate() {
-  const amt = parseFloat(document.getElementById('fund-amount')?.value) || 0;
-  const n = Math.max(1, parseInt(document.getElementById('fund-every')?.value) || 1);
-  const el = document.getElementById('fund-estimate');
-  if (!el) return;
-  el.textContent = amt > 0
-    ? `That's about ${fmt(roundCent(amt * (PAYCHECKS_PER_MONTH / n)))} a month (you're paid weekly).`
-    : '';
-}
-
-function fundFormHTML(f) {
-  return `
-    <div class="form-group">
-      <label class="form-label">Name</label>
-      <input class="form-input" type="text" id="fund-label" placeholder="e.g. Gas" maxlength="30" value="${f ? escHtml(f.label) : ''}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Icon</label>
-      <input class="form-input" type="text" id="fund-icon" placeholder="⛽" maxlength="4" value="${f ? f.icon : ''}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Amount Taken Out</label>
-      <div class="input-wrap"><span class="dollar-sign">$</span>
-        <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="fund-amount" value="${f ? f.amount.toFixed(2) : ''}" oninput="updateFundEstimate()">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">How Often</label>
-      <div class="form-select-wrap">
-        <select class="form-select" id="fund-every" onchange="updateFundEstimate()">${fundFreqOptions(f ? Math.max(1, f.everyN||1) : 1)}</select>
-      </div>
-      <div class="text-xs text-muted mt-8" id="fund-estimate"></div>
-      <div class="text-xs text-muted mt-8">Counted in paychecks, not calendar months.</div>
-    </div>
-    ${paidByFieldHTML(f ? f.paidBy : null)}`;
-}
-
-function openAddFund() {
-  document.getElementById('modal-title').textContent = 'Add Flat-Amount Bucket';
-  document.getElementById('modal-body').innerHTML = `
-    ${fundFormHTML(null)}
-    <button class="btn btn-primary" onclick="submitFund(null)">Save Bucket</button>
-    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
-  showModal();
-  updateFundEstimate();
-  setTimeout(() => { const i = document.getElementById('fund-label'); if(i) i.focus(); }, 100);
-}
-
-function openEditFund(id) {
-  const f = (data.funds||[]).find(x => x.id === id);
-  if (!f) return;
-  const bal = fundBal(data, f);
-  document.getElementById('modal-title').textContent = 'Edit Bucket';
-  document.getElementById('modal-body').innerHTML = `
-    ${fundFormHTML(f)}
-    <div class="form-group">
-      <label class="form-label">Current Balance</label>
-      <div class="input-wrap"><span class="dollar-sign">$</span>
-        <input class="form-input dollar" type="number" step="0.01" id="fund-balance" value="${bal.toFixed(2)}">
-      </div>
-      <div class="text-xs text-muted mt-8">What's in the bucket right now — correct it here if it drifts from real life.</div>
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:12px">
-      <label class="form-label" style="margin:0;flex:1">Take it out of my next paycheck</label>
-      <input type="checkbox" id="fund-next" style="width:20px;height:20px;accent-color:var(--accent)" ${(f.paychecksUntilNext||0) <= 0 ? 'checked' : ''}>
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:12px">
-      <label class="form-label" style="margin:0;flex:1">Active</label>
-      <input type="checkbox" id="fund-active" style="width:20px;height:20px;accent-color:var(--accent)" ${f.active?'checked':''}>
-    </div>
-    <button class="btn btn-primary" onclick="submitFund('${id}')">Save Changes</button>
-    <div class="mt-8"><button class="btn btn-danger" onclick="deleteFund('${id}')">Delete Bucket</button></div>
-    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
-  showModal();
-  updateFundEstimate();
-}
-
-function submitFund(id) {
-  const label = document.getElementById('fund-label')?.value.trim();
-  const icon = (document.getElementById('fund-icon')?.value || '').trim() || '💰';
-  const amount = parseFloat(document.getElementById('fund-amount')?.value);
-  const everyN = Math.max(1, parseInt(document.getElementById('fund-every')?.value) || 1);
-
-  if (!label) { alert('Enter a name'); return; }
-  if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
-
-  if (!data.funds) data.funds = [];
-
-  if (id) {
-    const f = data.funds.find(x => x.id === id);
-    if (!f) return;
-    f.label = label; f.icon = icon; f.amount = roundCent(amount); f.everyN = everyN;
-    f.paidBy = readPaidBy(f.paidBy);
-    f.active = document.getElementById('fund-active')?.checked !== false;
-    f.paychecksUntilNext = document.getElementById('fund-next')?.checked
-      ? 0
-      : Math.min(everyN - 1, Math.max(1, f.paychecksUntilNext || 1));
-    ensureFundCategories(data);
-    const balInput = document.getElementById('fund-balance');
-    const newBal = balInput ? parseFloat(balInput.value) : NaN;
-    if (!isNaN(newBal)) data.categories[f.key].balance = roundCent(newBal);
-  } else {
-    data.funds.push({
-      id: uid(),
-      key: 'fund_' + uid().replace(/-/g,'').slice(0,10),
-      label, icon, amount: roundCent(amount), everyN,
-      paychecksUntilNext: 0, active: true, totalContributed: 0, paidBy: readPaidBy(null),
-    });
-    ensureFundCategories(data);
-  }
-
-  saveData(data);
-  hideModal();
-  renderAll();
-}
-
-function deleteFund(id) {
-  const f = (data.funds||[]).find(x => x.id === id);
-  if (!f) return;
-  const bal = fundBal(data, f);
-  if (!confirm(`Delete the ${f.label} bucket?\n\nNothing more comes out of your paychecks for it. The ${fmt(bal)} already set aside stays in your checking balance, and past purchases stay in your history.`)) return;
-  data.funds = data.funds.filter(x => x.id !== id);
-  saveData(data);
-  hideModal();
-  renderAll();
-}
-
-// ══════════════════════════════════════════════════
 //  PEOPLE MODALS
 // ══════════════════════════════════════════════════
 function openAddPerson() {
@@ -3379,15 +3370,23 @@ function ownerOptions(selected) {
     people(data).map(p => `<option value="${p.id}"${selected===p.id?' selected':''}>${p.icon} ${escHtml(p.name)} only</option>`).join('');
 }
 
+function catFreqOptions(selected) {
+  return [1,2,3,4,5,6,8,10,12].map(n => {
+    const label = n === 1 ? 'Every paycheck' : n === 2 ? 'Every other paycheck' : `Every ${ordinal(n)} paycheck`;
+    return `<option value="${n}"${n===selected?' selected':''}>${label}</option>`;
+  }).join('');
+}
+
 function categoryFormHTML(cat) {
+  const flat = cat ? isFlat(cat) : false;
   return `
     <div class="form-group">
       <label class="form-label">Name</label>
-      <input class="form-input" type="text" id="cat-label" placeholder="e.g. Car Fund" maxlength="30" value="${cat ? escHtml(cat.label) : ''}">
+      <input class="form-input" type="text" id="cat-label" placeholder="e.g. Chicken Feed" maxlength="30" value="${cat ? escHtml(cat.label) : ''}">
     </div>
     <div class="form-group">
       <label class="form-label">Icon</label>
-      <input class="form-input" type="text" id="cat-icon" placeholder="🚗" maxlength="4" value="${cat ? cat.icon : ''}">
+      <input class="form-input" type="text" id="cat-icon" placeholder="🐔" maxlength="4" value="${cat ? cat.icon : ''}">
     </div>
     <div class="form-group">
       <label class="form-label">Type</label>
@@ -3404,18 +3403,82 @@ function categoryFormHTML(cat) {
         <input class="form-input dollar" type="number" min="0" step="0.01" placeholder="0.00" id="cat-goal" value="${cat && cat.goal ? cat.goal : ''}">
       </div>
     </div>
+
+    <div class="form-group">
+      <label class="form-label">How It's Funded</label>
+      <div class="person-pick-row">
+        <button class="person-pick${flat?'':' active'}" id="fund-pick-percent" onclick="setCatFunding('percent')">% of paycheck</button>
+        <button class="person-pick${flat?' active':''}" id="fund-pick-flat" onclick="setCatFunding('flat')">Flat amount</button>
+      </div>
+      <input type="hidden" id="cat-funding" value="${flat?'flat':'percent'}">
+      <div class="text-xs text-muted mt-8" id="cat-funding-note"></div>
+    </div>
+
+    <div id="cat-flat-fields" style="display:${flat?'':'none'}">
+      <div class="form-group">
+        <label class="form-label">Amount Taken Out</label>
+        <div class="input-wrap"><span class="dollar-sign">$</span>
+          <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="0.00" id="cat-flat-amount" value="${cat && cat.flatAmount ? Number(cat.flatAmount).toFixed(2) : ''}" oninput="updateCatFlatEstimate()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">How Often</label>
+        <div class="form-select-wrap">
+          <select class="form-select" id="cat-every" onchange="updateCatFlatEstimate()">${catFreqOptions(cat && cat.everyN ? Math.max(1, cat.everyN) : 1)}</select>
+        </div>
+        <div class="text-xs text-muted mt-8" id="cat-flat-estimate"></div>
+        <div class="text-xs text-muted mt-8">Counted in paychecks, not calendar months.</div>
+      </div>
+      ${people(data).length > 1 ? `
+      <div class="form-group">
+        <label class="form-label">Comes Out Of</label>
+        <div class="form-select-wrap">
+          <select class="form-select" id="cat-paidby">${paidByOptions(cat ? cat.paidBy : null)}</select>
+        </div>
+      </div>` : ''}
+    </div>
+
     <div class="form-group">
       <label class="form-label">Whose Is It?</label>
       <div class="form-select-wrap">
         <select class="form-select" id="cat-owner">${ownerOptions(cat ? cat.owner : 'shared')}</select>
       </div>
       <div class="text-xs text-muted mt-8">"Both of us" shows up in both paycheck splits. Otherwise only that person's paycheck can feed it.</div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:12px">
+      <label class="form-label" style="margin:0;flex:1">Giving / tithe <span class="text-xs text-muted" style="text-transform:none;letter-spacing:0">— comes out first of all</span></label>
+      <input type="checkbox" id="cat-giving" style="width:20px;height:20px;accent-color:var(--accent)" ${cat && cat.giving ? 'checked' : ''}>
     </div>`;
 }
 
 function onCatTypeChange() {
   const wrap = document.getElementById('cat-goal-wrap');
   if (wrap) wrap.style.display = document.getElementById('cat-type')?.value === 'savings' ? '' : 'none';
+}
+
+function setCatFunding(kind) {
+  const hidden = document.getElementById('cat-funding');
+  if (hidden) hidden.value = kind;
+  const flat = kind === 'flat';
+  const pf = document.getElementById('fund-pick-percent');
+  const ff = document.getElementById('fund-pick-flat');
+  if (pf) pf.className = 'person-pick' + (flat ? '' : ' active');
+  if (ff) ff.className = 'person-pick' + (flat ? ' active' : '');
+  const fields = document.getElementById('cat-flat-fields');
+  if (fields) fields.style.display = flat ? '' : 'none';
+  const note = document.getElementById('cat-funding-note');
+  if (note) note.textContent = flat
+    ? 'A fixed dollar amount, taken before the percentage buckets are worked out.'
+    : 'A share of your paycheck. All percentage buckets together have to add up to 100%.';
+  updateCatFlatEstimate();
+}
+
+function updateCatFlatEstimate() {
+  const amt = parseFloat(document.getElementById('cat-flat-amount')?.value) || 0;
+  const n = Math.max(1, parseInt(document.getElementById('cat-every')?.value) || 1);
+  const el = document.getElementById('cat-flat-estimate');
+  if (!el) return;
+  el.textContent = amt > 0 ? `That's about ${fmt(roundCent(amt * (PAYCHECKS_PER_MONTH / n)))} a month (you're paid weekly).` : '';
 }
 
 function openAddCategory() {
@@ -3426,6 +3489,7 @@ function openAddCategory() {
     <button class="btn btn-primary" onclick="submitCategory(null)">Add Category</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
+  setCatFunding('percent');
   setTimeout(() => { const i = document.getElementById('cat-label'); if(i) i.focus(); }, 100);
 }
 
@@ -3445,6 +3509,7 @@ function openEditCategory(key) {
     <div class="mt-8"><button class="btn btn-danger" onclick="openDeleteCategory('${key}')">Remove Category</button></div>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
+  setCatFunding(isFlat(cat) ? 'flat' : 'percent');
 }
 
 function submitCategory(key) {
@@ -3454,24 +3519,53 @@ function submitCategory(key) {
   const owner = document.getElementById('cat-owner')?.value || 'shared';
   const goalRaw = parseFloat(document.getElementById('cat-goal')?.value);
   const goal = type === 'savings' && goalRaw > 0 ? roundCent(goalRaw) : null;
+  const funding = document.getElementById('cat-funding')?.value === 'flat' ? 'flat' : 'percent';
+  const giving = !!document.getElementById('cat-giving')?.checked;
+  const flatAmount = parseFloat(document.getElementById('cat-flat-amount')?.value);
+  const everyN = Math.max(1, parseInt(document.getElementById('cat-every')?.value) || 1);
+
   if (!label) { alert('Enter a name'); return; }
+  if (funding === 'flat' && (!flatAmount || flatAmount <= 0)) { alert('Enter the dollar amount to take out each time'); return; }
+
+  const cat = key ? data.categories[key] : null;
+  if (key && !cat) return;
+  const target = cat || {
+    balance: 0, goalMet: false, redirectTo: null, percents: {},
+    order: Math.max(0, ...allKeys(data).map(k => data.categories[k].order ?? 0)) + 1,
+    archived: false, custom: true,
+  };
+  const newKey = key || ('cat_' + uid().replace(/-/g,'').slice(0,10));
+
+  target.key = newKey;
+  target.label = label;
+  target.icon = icon;
+  target.type = type;
+  target.owner = owner;
+  target.goal = goal;
+  target.giving = giving;
+  target.fundingType = funding;
+
+  if (funding === 'flat') {
+    const wasFlat = isFlat(cat || {});
+    target.flatAmount = roundCent(flatAmount);
+    target.everyN = everyN;
+    if (!wasFlat) target.paychecksUntilNext = 0;   // switching over starts fresh
+    else target.paychecksUntilNext = Math.min(everyN - 1, Math.max(0, target.paychecksUntilNext || 0));
+    if (target.totalContributed === undefined) target.totalContributed = 0;
+    target.paidBy = document.getElementById('cat-paidby')?.value || target.paidBy || primaryPersonId(data);
+    // A flat bucket takes no percentage — zero it so the 100% check stays honest.
+    people(data).forEach(p => setCatPercent(target, p.id, 0));
+  }
 
   if (key) {
-    const cat = data.categories[key];
-    if (!cat) return;
-    cat.label = label; cat.icon = icon; cat.type = type; cat.owner = owner; cat.goal = goal;
     const balInput = document.getElementById('cat-balance');
     const newBal = balInput ? parseFloat(balInput.value) : NaN;
-    if (!isNaN(newBal)) cat.balance = roundCent(newBal);
-    cat.goalMet = goal !== null ? cat.balance >= goal : false;
-  } else {
-    const newKey = 'cat_' + uid().replace(/-/g,'').slice(0,10);
-    const maxOrder = Math.max(0, ...allKeys(data).map(k => data.categories[k].order ?? 0));
-    data.categories[newKey] = {
-      label, icon, type, owner, goal, balance: 0, goalMet: false, redirectTo: null,
-      percents: {}, order: maxOrder + 1, archived: false, custom: true,
-    };
+    if (!isNaN(newBal)) target.balance = roundCent(newBal);
   }
+  target.goalMet = goal !== null ? (target.balance || 0) >= goal : false;
+
+  data.categories[newKey] = target;
+  ensureCategoryKeys(data);
   saveData(data);
   hideModal();
   renderAll();
