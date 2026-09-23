@@ -448,5 +448,39 @@ assigned, which is the zero-based part of the method.
    `flatAmount` must never be one — it is a setting, so it is last-write-wins.
    The fuzz and two-phone convergence tests were re-run after the refactor.
 
+## 14. Session v2026.11.1 — "have $X in it by a date" buckets
+
+A third `fundingType` on categories: `'target'`, alongside `'percent'` and
+`'flat'`. The user's case: chicken feed costs $62.54 and he buys it roughly
+every two months, so he wants the bucket to *reach* that amount by a date rather
+than take a fixed slice each paycheck.
+
+```js
+{ fundingType:'target', targetAmount, targetDate,
+  recurYears, recurMonths, recurWeeks, recurDays }   // 0s = one-off
+```
+
+- Per paycheck it puts in `remaining ÷ fridaysUntilDate(targetDate)`, the same
+  self-correcting shape as bills and savings targets. Verified: $62.54 by Nov 20
+  from Sep 25 = 9 × $6.95 landing exactly on the date.
+- **It is never charged automatically.** That is the whole point versus a bill —
+  he spends from it whenever, the balance drops, and later paychecks refill it.
+- The cycle rolls forward on its own via `rollTargetDates(d)` (called from
+  `migrateData` and `syncNormalize`), reusing the bills engine's
+  `addRecurrence`, so "every 2 months" keeps going untouched.
+- Contributions stop at the target — no overfilling.
+- It sits in the Four Walls step of the paycheck order with the other
+  dollar-funded buckets, and is NOT earmarked out of spendable (same call as
+  flat buckets in v2026.8.2 — the user said "just like gas").
+
+`isFlat(cat)` now means "dollar-funded" and covers both `'flat'` and
+`'target'`; `isTarget(cat)` distinguishes them. `takeFlatContributions` and
+`previewFlatContributions` are both thin wrappers over
+`collectFlatContributions(d, personId, commit)` — only the committing one ticks
+the per-paycheck countdowns, and target buckets have no countdown to tick.
+
+The dashboard card for a target bucket carries a progress bar and reads
+"$3.43/paycheck · $62.54 by Nov 23"; when it is full it reads "Ready".
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

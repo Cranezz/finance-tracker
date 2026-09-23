@@ -661,7 +661,7 @@
       <!-- Version -->
       <div class="card" style="text-align:center;padding:12px 16px">
         <div class="text-xs text-muted">Finance Tracker</div>
-        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.11.0</div>
+        <div style="font-size:18px;font-weight:800;color:var(--accent);margin:4px 0">v2026.11.1</div>
         <div class="text-xs text-muted">Last updated Sep 2026</div>
       </div>
     </div>
@@ -824,6 +824,7 @@ function migrateData(d) {
   migrateFunds(d);
   ensureCategoryKeys(d);
   migrateGoals(d);
+  rollTargetDates(d);
   return d;
 }
 
@@ -1073,21 +1074,6 @@ function previewGoalContributions(d, personId) {
     if (contrib <= 0) return;
     items.push({ goalId: g.id, key: g.key, amount: roundCent(contrib) });
     total = roundCent(total + contrib);
-  });
-  return { total, items };
-}
-
-// Same as takeFlatContributions but leaves the countdowns alone.
-function previewFlatContributions(d, personId) {
-  const items = [];
-  let total = 0;
-  flatCats(d).forEach(c => {
-    if (personId && !paidByMatches(c, personId, d)) return;
-    if ((c.paychecksUntilNext || 0) > 0) return;
-    const amt = roundCent(c.flatAmount || 0);
-    if (amt <= 0) return;
-    items.push({ key: c.key, amount: amt, savings: c.type === 'savings' });
-    total = roundCent(total + amt);
   });
   return { total, items };
 }
@@ -1536,7 +1522,7 @@ function ensureCategoryKeys(d) {
   });
 }
 
-// v2026.11.0 folded the separate "funds" list into categories: a flat bucket is
+// v2026.11.1 folded the separate "funds" list into categories: a flat bucket is
 // just a category funded by dollars instead of a percentage. Runs once.
 function migrateFunds(d) {
   if (!d.funds) d.funds = [];
@@ -1583,27 +1569,73 @@ function migrateFunds(d) {
 // ── Flat-amount categories (gas, chicken feed…) ───────────────────────────
 // Same objects as any other category — they just take dollars instead of a
 // percentage. Returned live, so edits write straight through.
+// Dollar-funded categories, in two flavours:
+//   'flat'   — a fixed amount every N paychecks (gas: $25 every paycheck)
+//   'target' — get the bucket to $X by a date, then again each cycle
+//              (chicken feed: $62.54 every 2 months). Nothing is ever charged
+//              automatically — it just fills up and you spend from it whenever.
 function flatCats(d) {
   const cats = (d || data).categories;
-  return allKeys(d).filter(k => cats[k].fundingType === 'flat').map(k => cats[k]);
+  return allKeys(d).filter(k => isFlat(cats[k])).map(k => cats[k]);
 }
 function percentCats(d) {
   const cats = (d || data).categories;
-  return allKeys(d).filter(k => cats[k].fundingType !== 'flat').map(k => cats[k]);
+  return allKeys(d).filter(k => !isFlat(cats[k])).map(k => cats[k]);
 }
-function isFlat(cat) { return cat && cat.fundingType === 'flat'; }
+function isFlat(cat)   { return !!cat && (cat.fundingType === 'flat' || cat.fundingType === 'target'); }
+function isTarget(cat) { return !!cat && cat.fundingType === 'target'; }
 function catBal(d, c) { return roundCent(d.categories[c.key]?.balance || 0); }
 function addToCat(d, c, amt) {
   if (!d.categories[c.key]) return;
   d.categories[c.key].balance = roundCent((d.categories[c.key].balance || 0) + amt);
 }
 
-// Sum of the flat SPENDING buckets, for the Spending Buckets total.
+// Sum of the dollar-funded SPENDING buckets, for the Spending Buckets total.
 function totalFlatBalances(d) {
   return roundCent(flatCats(d).filter(c => c.type !== 'savings').reduce((s, c) => s + catBal(d, c), 0));
 }
 
+// ── Target buckets ────────────────────────────────────────────────────────
+function catHasRepeat(c) { return !!(c.recurYears || c.recurMonths || c.recurWeeks || c.recurDays); }
+
+// The date this bucket next needs to be full. Rolls forward on its own once a
+// cycle passes, so "every 2 months" keeps going without being touched.
+function catTargetDate(d, c) {
+  if (!c.targetDate) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let due = new Date(c.targetDate + 'T00:00:00');
+  if (!catHasRepeat(c)) return due;
+  let guard = 0;
+  while (due < today && guard++ < 500) due = addRecurrence(due, c);
+  return due;
+}
+
+// Keeps the stored date in step with the rolled-forward one.
+function rollTargetDates(d) {
+  flatCats(d).forEach(c => {
+    if (!isTarget(c) || !c.targetDate) return;
+    const next = catTargetDate(d, c);
+    const iso = next ? dateToISO(next) : null;
+    if (iso && iso !== c.targetDate) c.targetDate = iso;
+  });
+}
+
+function catTargetRemaining(d, c) { return Math.max(0, roundCent((c.targetAmount || 0) - catBal(d, c))); }
+function catTargetPaychecksLeft(d, c) {
+  const due = catTargetDate(d, c);
+  return due ? fridaysUntilDate(due) : 1;
+}
+function catTargetPerPaycheck(d, c) {
+  const remaining = catTargetRemaining(d, c);
+  if (remaining <= 0) return 0;
+  return roundCent(remaining / catTargetPaychecksLeft(d, c));
+}
+
 function flatFreqLabel(c) {
+  if (isTarget(c)) {
+    const due = catTargetDate(data, c);
+    return `${fmt(c.targetAmount || 0)} by ${due ? fmtDate(dateToISO(due)) : 'then'}`;
+  }
   const n = Math.max(1, c.everyN || 1);
   if (n === 1) return 'Every paycheck';
   if (n === 2) return 'Every other paycheck';
@@ -1611,12 +1643,24 @@ function flatFreqLabel(c) {
 }
 
 function flatNextLabel(c) {
+  if (isTarget(c)) {
+    const left = catTargetPaychecksLeft(data, c);
+    const per = catTargetPerPaycheck(data, c);
+    if (per <= 0) return 'Full — nothing more comes out until you spend some';
+    return `${left} paycheck${left === 1 ? '' : 's'} left · ~${fmt(per)} out of each`;
+  }
   const left = c.paychecksUntilNext || 0;
   if (left <= 0) return 'Comes out of your next paycheck';
   return `Skipping the next ${left === 1 ? 'paycheck' : left + ' paychecks'} — comes out after that`;
 }
 
 function flatMonthlyRate(c) {
+  if (isTarget(c)) {
+    const months = ((c.recurYears || 0) * 12) + (c.recurMonths || 0)
+      + ((c.recurWeeks || 0) * 7 + (c.recurDays || 0)) / 30.44;
+    if (months > 0) return roundCent((c.targetAmount || 0) / months);
+    return 0; // one-off target — no ongoing monthly cost
+  }
   return roundCent((c.flatAmount || 0) * (PAYCHECKS_PER_MONTH / Math.max(1, c.everyN || 1)));
 }
 
@@ -1632,20 +1676,35 @@ function catSpentThisMonth(d, c) {
     .reduce((s, e) => s + e.amount, 0));
 }
 
-// What each flat bucket wants out of THIS paycheck. Ticks the countdown, so it
-// is called exactly once per paycheck.
+// What each dollar-funded bucket wants out of THIS paycheck. Ticks the
+// per-paycheck countdowns, so it runs exactly once per paycheck.
 function takeFlatContributions(d, personId) {
+  return collectFlatContributions(d, personId, true);
+}
+// Side-effect-free twin, for previews.
+function previewFlatContributions(d, personId) {
+  return collectFlatContributions(d, personId, false);
+}
+
+function collectFlatContributions(d, personId, commit) {
   const items = [];
   let total = 0;
   flatCats(d).forEach(c => {
     // Only the paycheck this bucket is paid from, or two earners fund it twice.
     if (personId && !paidByMatches(c, personId, d)) return;
-    const everyN = Math.max(1, c.everyN || 1);
-    if ((c.paychecksUntilNext || 0) > 0) { c.paychecksUntilNext--; return; }
-    const amt = roundCent(c.flatAmount || 0);
-    c.paychecksUntilNext = everyN - 1;
+
+    let amt = 0;
+    if (isTarget(c)) {
+      // Spread whatever is still missing over the paychecks left before the
+      // date. Self-correcting: spend from it and the next paychecks refill it.
+      amt = Math.min(catTargetPerPaycheck(d, c), catTargetRemaining(d, c));
+    } else {
+      if ((c.paychecksUntilNext || 0) > 0) { if (commit) c.paychecksUntilNext--; return; }
+      amt = roundCent(c.flatAmount || 0);
+      if (commit) c.paychecksUntilNext = Math.max(1, c.everyN || 1) - 1;
+    }
     if (amt <= 0) return;
-    items.push({ key: c.key, amount: amt, savings: c.type === 'savings' });
+    items.push({ key: c.key, amount: roundCent(amt), savings: c.type === 'savings' });
     total = roundCent(total + amt);
   });
   return { total, items };
@@ -1756,6 +1815,21 @@ function renderDashboard() {
   const flatCards = flatCats(data).filter(c => c.type !== 'savings').map(c => {
     const bal = catBal(data, c);
     const isNeg = bal < 0;
+    if (isTarget(c)) {
+      // Target buckets show how close they are to the amount they need.
+      const want = c.targetAmount || 0;
+      const pct = want > 0 ? Math.min(100, Math.round((Math.max(0, bal) / want) * 100)) : 0;
+      const full = catTargetRemaining(data, c) <= 0;
+      const due = catTargetDate(data, c);
+      return `<div class="cat-card flat-bucket" onclick="openEditCategory('${c.key}')">
+        <div class="cat-label">${c.icon} ${escHtml(c.label)}</div>
+        <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
+        <div class="progress-bar" style="margin-top:7px">
+          <div class="progress-fill${full?' done':''}" style="width:${pct}%${full?'':';background:var(--accent)'}"></div>
+        </div>
+        <div class="cat-sub">${full ? 'Ready' : fmt(catTargetPerPaycheck(data, c)) + '/paycheck'} · ${fmt(want)} by ${due ? fmtDate(dateToISO(due)) : ''}</div>
+      </div>`;
+    }
     return `<div class="cat-card flat-bucket" onclick="openEditCategory('${c.key}')">
       <div class="cat-label">${c.icon} ${escHtml(c.label)}</div>
       <div class="cat-amount ${isNeg?'negative':bal>0?'positive':''}">${fmt(bal)}</div>
@@ -1951,7 +2025,7 @@ function renderGoals() {
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:15px;font-weight:700">${c.icon} ${escHtml(c.label)}</div>
-          <div class="text-sm text-muted">${fmt(c.flatAmount)} ${flatFreqLabel(c).toLowerCase()} · about ${fmt(flatMonthlyRate(c))}/mo</div>
+          <div class="text-sm text-muted">${isTarget(c) ? flatFreqLabel(c) : fmt(c.flatAmount) + ' ' + flatFreqLabel(c).toLowerCase()}${flatMonthlyRate(c) > 0 ? ' · about ' + fmt(flatMonthlyRate(c)) + '/mo' : ''}</div>
         </div>
         <div style="font-size:22px;font-weight:800;color:${isNeg?'var(--danger)':'var(--success)'}">${fmt(bal)}</div>
       </div>
@@ -2036,6 +2110,7 @@ function renderBills() {
 // "25%" with one earner, "🧑25% · 💜10%" with two, or the dollar amount for a
 // flat bucket.
 function pctLabel(cat) {
+  if (isTarget(cat)) return flatFreqLabel(cat);
   if (isFlat(cat)) return `${fmt(cat.flatAmount || 0)} ${flatFreqLabel(cat).toLowerCase()}`;
   const ppl = people(data);
   if (ppl.length <= 1) return `${catPercent(cat, ppl[0]?.id || primaryPersonId(data))}%`;
@@ -2190,9 +2265,11 @@ function renderCategorySettings() {
   el.innerHTML = keys.map(k => {
     const cat = data.categories[k];
     const who = !cat.owner || cat.owner === 'shared' ? '👥 Both' : personChip(cat.owner);
-    const funding = isFlat(cat)
-      ? `<span style="color:var(--accent)">${fmt(cat.flatAmount || 0)} ${flatFreqLabel(cat).toLowerCase()}</span>`
-      : people(data).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
+    const funding = isTarget(cat)
+      ? `<span style="color:var(--accent)">${flatFreqLabel(cat)}${catHasRepeat(cat) ? ', ' + recurLabel(cat).toLowerCase() : ''}</span>`
+      : isFlat(cat)
+        ? `<span style="color:var(--accent)">${fmt(cat.flatAmount || 0)} ${flatFreqLabel(cat).toLowerCase()}</span>`
+        : people(data).map(p => `${p.icon}${catPercent(cat, p.id)}%`).join(' · ');
     return `<div class="settings-row${isFlat(cat) ? ' flat-row' : ''}" style="flex-wrap:wrap;gap:8px">
       <div class="sr-label" style="flex:1;min-width:0">
         <div style="font-weight:700">${cat.icon} ${escHtml(cat.label)}${cat.giving ? ' <span class="text-xs text-muted">giving</span>' : ''}</div>
@@ -3378,7 +3455,9 @@ function catFreqOptions(selected) {
 }
 
 function categoryFormHTML(cat) {
-  const flat = cat ? isFlat(cat) : false;
+  const mode = cat ? (cat.fundingType || 'percent') : 'percent';
+  const flat = mode === 'flat';
+  const defaultTargetDate = (() => { const d = new Date(); d.setMonth(d.getMonth()+2); return dateToISO(d); })();
   return `
     <div class="form-group">
       <label class="form-label">Name</label>
@@ -3407,10 +3486,11 @@ function categoryFormHTML(cat) {
     <div class="form-group">
       <label class="form-label">How It's Funded</label>
       <div class="person-pick-row">
-        <button class="person-pick${flat?'':' active'}" id="fund-pick-percent" onclick="setCatFunding('percent')">% of paycheck</button>
-        <button class="person-pick${flat?' active':''}" id="fund-pick-flat" onclick="setCatFunding('flat')">Flat amount</button>
+        <button class="person-pick${mode==='percent'?' active':''}" id="fund-pick-percent" onclick="setCatFunding('percent')">% of paycheck</button>
+        <button class="person-pick${mode==='flat'?' active':''}" id="fund-pick-flat" onclick="setCatFunding('flat')">Set amount</button>
+        <button class="person-pick${mode==='target'?' active':''}" id="fund-pick-target" onclick="setCatFunding('target')">Have $X by a date</button>
       </div>
-      <input type="hidden" id="cat-funding" value="${flat?'flat':'percent'}">
+      <input type="hidden" id="cat-funding" value="${mode}">
       <div class="text-xs text-muted mt-8" id="cat-funding-note"></div>
     </div>
 
@@ -3429,6 +3509,30 @@ function categoryFormHTML(cat) {
         <div class="text-xs text-muted mt-8" id="cat-flat-estimate"></div>
         <div class="text-xs text-muted mt-8">Counted in paychecks, not calendar months.</div>
       </div>
+    </div>
+
+    <div id="cat-target-fields" style="display:${mode==='target'?'':'none'}">
+      <div class="form-group">
+        <label class="form-label">Have This Much In It</label>
+        <div class="input-wrap"><span class="dollar-sign">$</span>
+          <input class="form-input dollar" type="number" min="0.01" step="0.01" placeholder="62.54" id="cat-target-amount" value="${cat && cat.targetAmount ? Number(cat.targetAmount).toFixed(2) : ''}" oninput="updateCatTargetEstimate()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">By When</label>
+        <input class="form-input" type="date" id="cat-target-date" value="${cat && cat.targetDate ? cat.targetDate : defaultTargetDate}" onchange="updateCatTargetEstimate()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Then Again</label>
+        <div class="form-select-wrap">
+          <select class="form-select" id="cat-target-repeat" onchange="updateCatTargetEstimate()">${catRepeatOptions(cat)}</select>
+        </div>
+        <div class="text-xs text-muted mt-8" id="cat-target-estimate"></div>
+        <div class="text-xs text-muted mt-8">Nothing is ever charged automatically — the bucket just fills up and you spend from it whenever you need to.</div>
+      </div>
+    </div>
+
+    <div id="cat-paidby-wrap" style="display:${mode==='percent'?'none':''}">
       ${people(data).length > 1 ? `
       <div class="form-group">
         <label class="form-label">Comes Out Of</label>
@@ -3456,21 +3560,54 @@ function onCatTypeChange() {
   if (wrap) wrap.style.display = document.getElementById('cat-type')?.value === 'savings' ? '' : 'none';
 }
 
+function catRepeatOptions(cat) {
+  const opts = [
+    { label: "Don't repeat — just once",  w: 0, m: 0 },
+    { label: 'Every 2 weeks',             w: 2, m: 0 },
+    { label: 'Every 4 weeks',             w: 4, m: 0 },
+    { label: 'Every month',               w: 0, m: 1 },
+    { label: 'Every 2 months',            w: 0, m: 2 },
+    { label: 'Every 3 months',            w: 0, m: 3 },
+    { label: 'Every 6 months',            w: 0, m: 6 },
+    { label: 'Every year',                w: 0, m: 12 },
+  ];
+  const curW = cat?.recurWeeks || 0, curM = (cat?.recurMonths || 0) + (cat?.recurYears || 0) * 12;
+  // A brand new target bucket defaults to every 2 months — the common case.
+  const isNew = !cat || !isTarget(cat);
+  return opts.map(o => {
+    const sel = isNew ? (o.m === 2 && o.w === 0) : (o.w === curW && o.m === curM);
+    return `<option value="${o.w}:${o.m}"${sel ? ' selected' : ''}>${o.label}</option>`;
+  }).join('');
+}
+
 function setCatFunding(kind) {
   const hidden = document.getElementById('cat-funding');
   if (hidden) hidden.value = kind;
-  const flat = kind === 'flat';
-  const pf = document.getElementById('fund-pick-percent');
-  const ff = document.getElementById('fund-pick-flat');
-  if (pf) pf.className = 'person-pick' + (flat ? '' : ' active');
-  if (ff) ff.className = 'person-pick' + (flat ? ' active' : '');
-  const fields = document.getElementById('cat-flat-fields');
-  if (fields) fields.style.display = flat ? '' : 'none';
+  [['percent','fund-pick-percent'],['flat','fund-pick-flat'],['target','fund-pick-target']].forEach(([k,id]) => {
+    const el = document.getElementById(id);
+    if (el) el.className = 'person-pick' + (k === kind ? ' active' : '');
+  });
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('cat-flat-fields', kind === 'flat');
+  show('cat-target-fields', kind === 'target');
+  show('cat-paidby-wrap', kind !== 'percent');
   const note = document.getElementById('cat-funding-note');
-  if (note) note.textContent = flat
-    ? 'A fixed dollar amount, taken before the percentage buckets are worked out.'
-    : 'A share of your paycheck. All percentage buckets together have to add up to 100%.';
+  if (note) note.textContent =
+    kind === 'flat'   ? 'A fixed dollar amount, taken before the percentage buckets are worked out.' :
+    kind === 'target' ? 'Each paycheck puts in a share of whatever is still missing, so it hits the amount on time. Spend from it and it refills.' :
+                        'A share of your paycheck. All percentage buckets together have to add up to 100%.';
   updateCatFlatEstimate();
+  updateCatTargetEstimate();
+}
+
+function updateCatTargetEstimate() {
+  const amt = parseFloat(document.getElementById('cat-target-amount')?.value) || 0;
+  const date = document.getElementById('cat-target-date')?.value;
+  const el = document.getElementById('cat-target-estimate');
+  if (!el) return;
+  if (!amt || !date) { el.textContent = ''; return; }
+  const paychecks = fridaysUntilDate(new Date(date + 'T00:00:00'));
+  el.textContent = `${paychecks} paycheck${paychecks === 1 ? '' : 's'} before then — about ${fmt(roundCent(amt / paychecks))} out of each one.`;
 }
 
 function updateCatFlatEstimate() {
@@ -3519,13 +3656,21 @@ function submitCategory(key) {
   const owner = document.getElementById('cat-owner')?.value || 'shared';
   const goalRaw = parseFloat(document.getElementById('cat-goal')?.value);
   const goal = type === 'savings' && goalRaw > 0 ? roundCent(goalRaw) : null;
-  const funding = document.getElementById('cat-funding')?.value === 'flat' ? 'flat' : 'percent';
+  const fundingRaw = document.getElementById('cat-funding')?.value;
+  const funding = fundingRaw === 'flat' || fundingRaw === 'target' ? fundingRaw : 'percent';
+  const targetAmount = parseFloat(document.getElementById('cat-target-amount')?.value);
+  const targetDate = document.getElementById('cat-target-date')?.value;
+  const repeatRaw = document.getElementById('cat-target-repeat')?.value || '0:0';
   const giving = !!document.getElementById('cat-giving')?.checked;
   const flatAmount = parseFloat(document.getElementById('cat-flat-amount')?.value);
   const everyN = Math.max(1, parseInt(document.getElementById('cat-every')?.value) || 1);
 
   if (!label) { alert('Enter a name'); return; }
   if (funding === 'flat' && (!flatAmount || flatAmount <= 0)) { alert('Enter the dollar amount to take out each time'); return; }
+  if (funding === 'target') {
+    if (!targetAmount || targetAmount <= 0) { alert('Enter how much you want in the bucket'); return; }
+    if (!targetDate) { alert('Pick the date you need it by'); return; }
+  }
 
   const cat = key ? data.categories[key] : null;
   if (key && !cat) return;
@@ -3545,16 +3690,27 @@ function submitCategory(key) {
   target.giving = giving;
   target.fundingType = funding;
 
+  if (funding === 'flat' || funding === 'target') {
+    if (target.totalContributed === undefined) target.totalContributed = 0;
+    target.paidBy = document.getElementById('cat-paidby')?.value || target.paidBy || primaryPersonId(data);
+    // A dollar-funded bucket takes no percentage — zero it so 100% stays honest.
+    people(data).forEach(p => setCatPercent(target, p.id, 0));
+  }
   if (funding === 'flat') {
-    const wasFlat = isFlat(cat || {});
+    const wasFlat = cat && cat.fundingType === 'flat';
     target.flatAmount = roundCent(flatAmount);
     target.everyN = everyN;
     if (!wasFlat) target.paychecksUntilNext = 0;   // switching over starts fresh
     else target.paychecksUntilNext = Math.min(everyN - 1, Math.max(0, target.paychecksUntilNext || 0));
-    if (target.totalContributed === undefined) target.totalContributed = 0;
-    target.paidBy = document.getElementById('cat-paidby')?.value || target.paidBy || primaryPersonId(data);
-    // A flat bucket takes no percentage — zero it so the 100% check stays honest.
-    people(data).forEach(p => setCatPercent(target, p.id, 0));
+  }
+  if (funding === 'target') {
+    const [rw, rm] = repeatRaw.split(':').map(n => parseInt(n) || 0);
+    target.targetAmount = roundCent(targetAmount);
+    target.targetDate = targetDate;
+    target.recurYears = 0;
+    target.recurMonths = rm;
+    target.recurWeeks = rw;
+    target.recurDays = 0;
   }
 
   if (key) {
@@ -4254,6 +4410,7 @@ function syncApplyOps(root, ops) { (ops || []).forEach(op => syncApplyOp(root, o
 // newest-first lists, counters in range, and every derived bucket present.
 function syncNormalize(d) {
   migrateData(d);
+  rollTargetDates(d);
   // Newest first, with tiebreakers so two phones always agree on the order of
   // things entered on the same day.
   const byDateDesc = (a, b) =>
