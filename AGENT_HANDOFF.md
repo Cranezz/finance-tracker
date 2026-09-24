@@ -595,5 +595,29 @@ hatched red to the LEFT of a zero tick, so positives minus negatives =
 `#dash-stack-read`; "See the numbers" (`#dash-stack-table`) lists every
 item. Display only: the hero "Safe to spend" formula is unchanged.
 
+## 19. Session v2026.12.4 — Checking is the headline; money can change jobs
+
+The user wanted the Home figure to be exactly what should be in the checking
+account, not "Safe to spend". Hero, header readout ("Checking") and the whole
+bar are now `checkingBalance`. The first tile shows **Unassigned**
+(`unassignedChecking(d)` = checking minus every bucket in it; "Short" when
+negative). Tapping the hero or "Match my bank" opens `openMatchBank()`: type
+the bank's number, only `checkingBalance` changes, so the difference lands in
+Unassigned.
+
+**Bug behind the request:** Deposit into a spending bucket always raised
+checking too, as if it were new money. The user moved unassigned money into a
+new Steam Frame bucket, so checking went up and Unassigned never went down.
+Deposit/Withdraw now ask where the money comes from or goes
+(`setAdjustSource`, hidden `#chk-src`):
+- bucket in checking: *From/Back to Unassigned* (bucket moves, checking
+  doesn't) or *New money / Out of the bank* (both move, the old behaviour)
+- savings account: *From/Into checking* (a transfer: checking moves the other
+  way) or *New money / Out of the bank* (savings only, the old behaviour)
+Default is "From Unassigned" only for a deposit into a checking bucket while
+Unassigned > 0; everything else defaults to the old behaviour. Adjustments
+record `source`. Existing data isn't touched: the user fixes the inflated
+checking with Match my bank.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

@@ -195,6 +195,9 @@
     .stackbar .seg:first-child { border-radius: 5px 0 0 5px; }
     .stackbar .seg:last-child  { border-radius: 0 5px 5px 0; }
     .stackbar .seg:only-child  { border-radius: 5px; }
+    .hero-fix { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--accent); letter-spacing: 0; text-transform: none; padding: 6px 0; }
+    #dash-hero { cursor: pointer; }
+    .t-v.negative { color: var(--neg); }
     .stack-cap { font-size: 13px; color: var(--ink-3); margin: 2px 0 8px; }
     .stack-hit { padding: 10px 0; margin: -10px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #dash-stack { height: 14px; border-radius: 7px; overflow: visible; background: transparent; align-items: center; }
@@ -680,7 +683,7 @@
     <div class="hdr-row">
       <h1 id="header-title">Home</h1>
       <div class="hdr-figs">
-        <div class="hdr-fig"><span class="k">Spendable</span><span id="header-checking-amt">$0.00</span></div>
+        <div class="hdr-fig"><span class="k">Checking</span><span id="header-checking-amt">$0.00</span></div>
         <div class="hdr-fig"><span class="k">Saved</span><span id="header-balance">$0.00</span></div>
       </div>
     </div>
@@ -691,10 +694,10 @@
     <div id="tab-0" class="tab-content active">
       <div id="sync-banner" class="sync-banner" style="display:none"></div>
 
-      <section class="hero" aria-label="Safe to spend">
-        <div class="hero-eyebrow">Safe to spend</div>
-        <div class="hero-fig" id="dash-hero">$0.00</div>
-        <div class="stack-cap">Where your checking is</div>
+      <section class="hero" aria-label="In checking">
+        <div class="hero-eyebrow">In checking <button class="hero-fix" onclick="openMatchBank()">Match my bank</button></div>
+        <div class="hero-fig" id="dash-hero" onclick="openMatchBank()">$0.00</div>
+        <div class="stack-cap">Where it is</div>
         <div class="stack-hit" onclick="stackTap(event)"><div class="stackbar" id="dash-stack" aria-hidden="true"></div></div>
         <div class="legend" id="dash-stack-legend"></div>
         <div class="stack-read" id="dash-stack-read" aria-live="polite"></div>
@@ -703,7 +706,7 @@
       </section>
 
       <div class="tiles">
-        <div class="tile"><div class="t-l">In checking</div><div class="t-v" id="dash-checking">$0</div><div class="t-s" id="dash-checking-meta"></div></div>
+        <div class="tile"><div class="t-l" id="dash-checking-lbl">Unassigned</div><div class="t-v" id="dash-checking">$0</div><div class="t-s" id="dash-checking-meta"></div></div>
         <div class="tile"><div class="t-l">Saved</div><div class="t-v" id="dash-total">$0</div><div class="t-s" id="dash-saved-sub"></div></div>
         <div class="tile"><div class="t-l">Paycheck</div><div class="t-v" id="dash-last-paycheck">—</div><div class="t-s" id="dash-last-sub"></div></div>
       </div>
@@ -858,7 +861,7 @@
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b>v2026.12.3</b>Updated Sep 2026</div>
+      <div class="version-mark">Finance Tracker<b>v2026.12.4</b>Updated Sep 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -1945,9 +1948,11 @@ function renderHeader() {
   const el = document.getElementById('header-balance');
   el.textContent = fmt(savings);
   el.className = savings < 0 ? 'negative' : '';
-  // Header shows spendable checking (minus bill reserves and savings targets)
-  const spendable = roundCent((data.checkingBalance||0) - totalBillReserves(data) - totalGoalReserves(data));
-  document.getElementById('header-checking-amt').textContent = fmt(spendable);
+  // Header shows what should be in the checking account, exactly
+  const checking = roundCent(data.checkingBalance || 0);
+  const hc = document.getElementById('header-checking-amt');
+  hc.textContent = fmt(checking);
+  hc.className = checking < 0 ? 'negative' : '';
 }
 
 // ── Dashboard ───────────────────────────────────────────
@@ -1988,18 +1993,13 @@ function renderDashboard() {
   const savings = totalSavings(data);
   const lastP = data.paychecks[0];
 
-  // Checking, and how much of it is actually free
-  const checkingTotal = data.checkingBalance || 0;
-  const billReserve = totalBillReserves(data);
-  const goalReserve = totalGoalReserves(data);
-  const available = roundCent(checkingTotal - billReserve - goalReserve);
-  const transferred = getTransferredAmount();
+  const checkingTotal = roundCent(data.checkingBalance || 0);
 
-  // Hero — the one number this screen leads with
+  // Hero — exactly what should be in the checking account
   const hero = document.getElementById('dash-hero');
   if (hero) {
-    countTo(hero, available, heroMoney);
-    hero.className = 'hero-fig' + (available < 0 ? ' negative' : '');
+    countTo(hero, checkingTotal, heroMoney);
+    hero.className = 'hero-fig' + (checkingTotal < 0 ? ' negative' : '');
   }
 
   renderCheckingBar(lastP);
@@ -2009,8 +2009,13 @@ function renderDashboard() {
     const el = document.getElementById(id); if (el) el.textContent = text;
     const s2 = document.getElementById(subId); if (s2) s2.textContent = sub;
   };
-  setTile('dash-checking', fmtShort(checkingTotal), 'dash-checking-meta',
-    transferred > 0 ? `${fmtShort(transferred)} moved out` : 'in your bank');
+  const unassigned = unassignedChecking(data);
+  const lbl = document.getElementById('dash-checking-lbl');
+  if (lbl) lbl.textContent = unassigned < 0 ? 'Short' : 'Unassigned';
+  setTile('dash-checking', unassigned < 0 ? '−' + fmtShort(-unassigned) : fmtShort(unassigned), 'dash-checking-meta',
+    unassigned < 0 ? 'buckets > checking' : 'in no bucket');
+  const tv = document.getElementById('dash-checking');
+  if (tv) tv.classList.toggle('negative', unassigned < 0);
   const nSave = savingsKeys().length;
   setTile('dash-total', fmtShort(savings), 'dash-saved-sub', `${nSave} account${nSave === 1 ? '' : 's'}`);
   setTile('dash-last-paycheck', lastP ? fmtShort(lastP.grossAmount) : '—', 'dash-last-sub',
@@ -2099,6 +2104,54 @@ function checkingBreakdown(d) {
 
   items.forEach(x => { if (x.v < 0) x.neg = true; });
   return items;
+}
+
+// Checking minus everything in it that already has a job. Negative means the
+// buckets add up to more than the account actually holds.
+function unassignedChecking(d) {
+  const it = checkingBreakdown(d).find(x => x.kind === 'free');
+  return it ? it.v : 0;
+}
+
+// Tap the checking figure: type what the bank app says. Only checking moves,
+// so the difference lands in (or comes out of) Unassigned; no bucket changes.
+function openMatchBank() {
+  const cur = roundCent(data.checkingBalance || 0);
+  document.getElementById('modal-title').textContent = 'Match my bank';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:14px">Type the checking balance your bank app shows. Your buckets stay exactly as they are — only <b>Unassigned</b> changes.</div>
+    <div class="form-group">
+      <label class="form-label">Checking balance at the bank</label>
+      <div class="input-wrap">
+        <span class="dollar-sign">$</span>
+        <input class="form-input dollar" type="number" inputmode="decimal" step="0.01" id="bank-amt" value="${cur.toFixed(2)}" oninput="updateMatchBankHint()">
+      </div>
+      <div class="text-xs text-muted mt-8" id="bank-hint"></div>
+    </div>
+    <button class="btn btn-primary" onclick="submitMatchBank()">Save</button>
+    <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
+  showModal();
+  updateMatchBankHint();
+}
+
+function updateMatchBankHint() {
+  const el = document.getElementById('bank-hint');
+  const v = parseFloat(document.getElementById('bank-amt')?.value);
+  if (!el) return;
+  if (isNaN(v)) { el.textContent = ''; return; }
+  const diff = roundCent(v - (data.checkingBalance || 0));
+  const after = roundCent(unassignedChecking(data) + diff);
+  el.textContent = Math.abs(diff) < 0.005 ? 'Already matches.'
+    : `Checking ${diff > 0 ? 'goes up' : 'goes down'} by ${fmt(Math.abs(diff))} → Unassigned becomes ${after < 0 ? '−' + fmt(-after) + ' (short)' : fmt(after)}.`;
+}
+
+function submitMatchBank() {
+  const v = parseFloat(document.getElementById('bank-amt')?.value);
+  if (isNaN(v)) { alert('Enter your bank balance'); return; }
+  data.checkingBalance = roundCent(v);
+  saveData(data);
+  hideModal();
+  renderAll();
 }
 
 function renderCheckingBar(lastP) {
@@ -3217,10 +3270,18 @@ function openAdjustChecking(dir) {
     <div class="form-group">
       <label class="form-label">${isDeposit ? 'Deposit Into' : 'Take It Out Of'}</label>
       <div class="form-select-wrap">
-        <select class="form-select" id="chk-category" onchange="updateAdjustHint(${dir})">${adjustAccountOptions()}</select>
+        <select class="form-select" id="chk-category" onchange="setAdjustSource('', ${dir})">${adjustAccountOptions()}</select>
       </div>
-      <div class="text-xs text-muted mt-8" id="chk-hint"></div>
     </div>
+    <div class="form-group" id="chk-src-wrap">
+      <label class="form-label" id="chk-src-label"></label>
+      <div class="person-pick-row">
+        <button class="person-pick" id="chk-src-move" onclick="setAdjustSource('move', ${dir})"></button>
+        <button class="person-pick" id="chk-src-bank" onclick="setAdjustSource('bank', ${dir})"></button>
+      </div>
+      <input type="hidden" id="chk-src" value="">
+    </div>
+    <div class="text-xs text-muted" id="chk-hint" style="margin:-6px 0 16px"></div>
     <div class="form-group">
       <label class="form-label">Note (optional)</label>
       <input class="form-input" type="text" placeholder="${isDeposit ? 'e.g. birthday money...' : 'e.g. cash for gas...'}" id="chk-note" maxlength="60">
@@ -3228,23 +3289,62 @@ function openAdjustChecking(dir) {
     <button class="btn btn-primary" onclick="submitCheckingAdj(${dir})">Confirm</button>
     <div class="mt-8"><button class="btn btn-secondary" onclick="hideModal()">Cancel</button></div>`;
   showModal();
-  updateAdjustHint(dir);
+  setAdjustSource('', dir);
   setTimeout(() => { const i = document.getElementById('chk-amount'); if(i) i.focus(); }, 100);
 }
 
-// Spells out exactly which balances will move, so a deposit into savings can
-// never look like it silently touched checking.
+// Where the money comes from (deposit) or goes (withdraw):
+//  'bank' — it really arrives in / leaves the bank. Checking moves with the
+//           bucket (for a savings account, only the savings account moves).
+//  'move' — it just changes jobs inside what you already have. A bucket in
+//           checking moves against Unassigned, so checking stays put; a
+//           savings account moves against checking (a transfer).
+function setAdjustSource(src, dir) {
+  const key = document.getElementById('chk-category')?.value;
+  const cat = key ? data.categories[key] : null;
+  const wrap = document.getElementById('chk-src-wrap');
+  const hidden = document.getElementById('chk-src');
+  if (!wrap || !hidden) return;
+  if (!cat) { wrap.style.display = 'none'; hidden.value = 'bank'; updateAdjustHint(dir); return; }
+  wrap.style.display = '';
+  const saving = cat.type === 'savings';
+  const dep = dir > 0;
+  document.getElementById('chk-src-label').textContent = dep ? 'Where is it coming from?' : 'Where is it going?';
+  document.getElementById('chk-src-move').textContent = saving ? (dep ? 'From checking' : 'Into checking') : (dep ? 'From Unassigned' : 'Back to Unassigned');
+  document.getElementById('chk-src-bank').textContent = saving ? (dep ? 'New money' : 'Out of the bank') : (dep ? 'New money' : 'Out of the bank');
+  if (!src) {
+    // Filling a bucket in checking usually means giving Unassigned money a job,
+    // so that's the default when there is some. Everything else keeps the old
+    // behaviour: withdrawals leave the bank, savings deposits are new money.
+    src = hidden.value && hidden.dataset.key === key ? hidden.value
+      : (!saving && dep && unassignedChecking(data) > 0) ? 'move' : 'bank';
+  }
+  hidden.value = src; hidden.dataset.key = key;
+  document.getElementById('chk-src-move').className = 'person-pick' + (src === 'move' ? ' active' : '');
+  document.getElementById('chk-src-bank').className = 'person-pick' + (src === 'bank' ? ' active' : '');
+  updateAdjustHint(dir);
+}
+
+// Spells out exactly which balances will move, so nothing ever changes silently.
 function updateAdjustHint(dir) {
   const el = document.getElementById('chk-hint');
   if (!el) return;
   const key = document.getElementById('chk-category')?.value;
-  const verb = dir > 0 ? 'added to' : 'taken out of';
-  if (!key) { el.textContent = `Only your checking balance changes.`; return; }
+  const src = document.getElementById('chk-src')?.value || 'bank';
+  const up = dir > 0;
+  if (!key) { el.textContent = `Only your checking balance changes (Unassigned ${up ? 'goes up' : 'goes down'}).`; return; }
   const cat = data.categories[key];
   if (!cat) { el.textContent = ''; return; }
-  el.textContent = cat.type === 'savings'
-    ? `Only ${cat.label} changes — your checking balance stays exactly where it is.`
-    : `${cat.label} and your checking balance both change (this money sits in checking).`;
+  const name = cat.label;
+  if (cat.type === 'savings') {
+    el.textContent = src === 'move'
+      ? `${name} ${up ? 'goes up' : 'goes down'} and checking ${up ? 'goes down' : 'goes up'} by the same amount.`
+      : `Only ${name} changes — checking stays exactly where it is.`;
+  } else {
+    el.textContent = src === 'move'
+      ? `${name} ${up ? 'goes up' : 'goes down'} and Unassigned ${up ? 'goes down' : 'goes up'} — checking stays the same.`
+      : `${name} and checking both ${up ? 'go up' : 'go down'} (this money sits in checking).`;
+  }
 }
 
 function submitCheckingAdj(dir) {
@@ -3254,9 +3354,15 @@ function submitCheckingAdj(dir) {
   const note = document.getElementById('chk-note')?.value.trim() || '';
   const cat = key ? data.categories[key] : null;
 
+  const src = cat ? (document.getElementById('chk-src')?.value || 'bank') : 'bank';
+
   // Savings balances live outside checking; everything else lives inside it.
-  const touchesChecking = !cat || cat.type !== 'savings';
-  if (touchesChecking) data.checkingBalance = roundCent((data.checkingBalance||0) + dir * amt);
+  // A 'move' only changes which job the money has, never how much there is.
+  let checkingDelta = 0;
+  if (!cat) checkingDelta = dir * amt;
+  else if (cat.type === 'savings') checkingDelta = src === 'move' ? -dir * amt : 0;
+  else checkingDelta = src === 'move' ? 0 : dir * amt;
+  if (checkingDelta) data.checkingBalance = roundCent((data.checkingBalance||0) + checkingDelta);
   if (cat) cat.balance = roundCent((cat.balance||0) + dir * amt);
 
   let celebration = null;
@@ -3270,7 +3376,7 @@ function submitCheckingAdj(dir) {
   }
 
   data.adjustments = data.adjustments || [];
-  data.adjustments.unshift({ id: uid(), date: todayISO(), createdAt: Date.now(), amount: roundCent(dir * amt), key: key || 'checking', note });
+  data.adjustments.unshift({ id: uid(), date: todayISO(), createdAt: Date.now(), amount: roundCent(dir * amt), key: key || 'checking', note, source: src });
 
   saveData(data);
   hideModal();
@@ -4312,7 +4418,7 @@ function deleteGoal(id) {
   const g = (data.goals||[]).find(x => x.id === id);
   if (!g) return;
   const bal = goalBal(data, g);
-  if (!confirm(`Delete the ${g.label} target?\n\nThe ${fmt(bal)} saved stays in your checking balance and becomes spendable again.`)) return;
+  if (!confirm(`Delete the ${g.label} target?\n\nThe ${fmt(bal)} saved stays in checking and goes back to Unassigned.`)) return;
   data.goals = data.goals.filter(x => x.id !== id);
   if (data.categories[g.key]) { data.categories[g.key].balance = 0; data.categories[g.key].archived = true; }
   saveData(data);
