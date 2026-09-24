@@ -574,5 +574,26 @@ is untouched. The `scanHint` field on categories stays in the data (harmless,
 and removing it would mean rewriting stored data). `escHtml` lived between
 the scanner functions and was kept.
 
+## 18. Session v2026.12.2–12.3 — Pages redeploy; per-bucket checking bar
+
+**v2026.12.2:** GitHub Pages silently never built v2026.12.0/12.1, so the
+phone stayed on v11.2. A fresh push to `main` triggered the build. Added
+`.nojekyll`. **After every push, check the "pages build and deployment" run
+for the new commit** (GitHub MCP `actions_list list_workflow_runs`).
+
+**v2026.12.3:** the Home bar under "Safe to spend" used to read Targets /
+Bills / Free, and "Free" was misleading because envelope money isn't free.
+It now shows *where every dollar of checking is*, one segment per item:
+`checkingBreakdown(d)` returns bill reserves (amber), savings targets and
+savings transfers not yet ticked off (green), every spending category
+including fixed and by-a-date buckets (blue, the same set as the Envelopes
+section), and the remainder as Unassigned (muted). Negatives (an overspent
+envelope, or "Short" when buckets add up to more than checking) are drawn
+hatched red to the LEFT of a zero tick, so positives minus negatives =
+`checkingBalance` exactly. The legend has per-kind totals; tapping the bar
+(`stackTap`, hit area taller than the bar) names one segment in
+`#dash-stack-read`; "See the numbers" (`#dash-stack-table`) lists every
+item. Display only: the hero "Safe to spend" formula is unchanged.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

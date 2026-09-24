@@ -195,6 +195,22 @@
     .stackbar .seg:first-child { border-radius: 5px 0 0 5px; }
     .stackbar .seg:last-child  { border-radius: 0 5px 5px 0; }
     .stackbar .seg:only-child  { border-radius: 5px; }
+    .stack-cap { font-size: 13px; color: var(--ink-3); margin: 2px 0 8px; }
+    .stack-hit { padding: 10px 0; margin: -10px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    #dash-stack { height: 14px; border-radius: 7px; overflow: visible; background: transparent; align-items: center; }
+    #dash-stack .seg { border-radius: 2px; transition: flex-grow .6s var(--ease), opacity .2s; }
+    #dash-stack .seg:first-child { border-radius: 7px 2px 2px 7px; }
+    #dash-stack .seg:last-child  { border-radius: 2px 7px 7px 2px; }
+    #dash-stack .seg:only-child  { border-radius: 7px; }
+    #dash-stack .seg.neg { min-width: 7px; }
+    #dash-stack .zero { width: 2px; height: 22px; background: var(--ink); border-radius: 1px; flex: none; }
+    #dash-stack.picking .seg:not(.on) { opacity: .28; }
+    .legend .sw.hatch { background: repeating-linear-gradient(135deg, var(--neg) 0 2px, var(--neg-soft) 2px 4px); }
+    .legend .li b.negative { color: var(--neg); }
+    .stack-read { margin-top: 8px; min-height: 20px; font-size: 13px; color: var(--ink-2); }
+    .stack-read b { color: var(--ink); font-weight: 650; }
+    .stack-read .negative { color: var(--neg); font-weight: 600; }
+    .stack-read .rd-note { color: var(--ink-3); }
     .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; }
     .legend .li { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
     .legend .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
@@ -524,6 +540,9 @@
     details.numbers table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
     details.numbers td { padding: 7px 0; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
     details.numbers td:last-child { text-align: right; font-weight: 600; }
+    details.numbers td.negative { color: var(--neg); }
+    details.numbers tr.total td { border-bottom: 0; font-weight: 700; padding-top: 10px; }
+    details.numbers td .text-xs { font-weight: 400; }
     .cat-bar-row { margin-bottom: 12px; }
     .cat-bar-label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
     .timeline-filter { display: inline-flex; gap: 2px; padding: 3px; background: var(--inset); border: 1px solid var(--rule); border-radius: 12px; margin-bottom: 14px; }
@@ -675,8 +694,12 @@
       <section class="hero" aria-label="Safe to spend">
         <div class="hero-eyebrow">Safe to spend</div>
         <div class="hero-fig" id="dash-hero">$0.00</div>
-        <div class="stackbar" id="dash-stack" aria-hidden="true"></div>
+        <div class="stack-cap">Where your checking is</div>
+        <div class="stack-hit" onclick="stackTap(event)"><div class="stackbar" id="dash-stack" aria-hidden="true"></div></div>
         <div class="legend" id="dash-stack-legend"></div>
+        <div class="stack-read" id="dash-stack-read" aria-live="polite"></div>
+        <details class="numbers" id="dash-stack-table" style="display:none"><summary>See the numbers</summary>
+          <table><tbody></tbody></table></details>
       </section>
 
       <div class="tiles">
@@ -835,7 +858,7 @@
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b>v2026.12.2</b>Updated Sep 2026</div>
+      <div class="version-mark">Finance Tracker<b>v2026.12.3</b>Updated Sep 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -1979,24 +2002,7 @@ function renderDashboard() {
     hero.className = 'hero-fig' + (available < 0 ? ' negative' : '');
   }
 
-  // Where checking is: saved for targets · set aside for bills · free to spend
-  const stack = document.getElementById('dash-stack');
-  const legend = document.getElementById('dash-stack-legend');
-  if (stack && legend) {
-    const parts = [
-      { v: goalReserve, c: 'var(--flow-saving)', l: 'Targets' },
-      { v: billReserve, c: 'var(--flow-walls)', l: 'Bills' },
-      { v: Math.max(0, available), c: 'var(--flow-spending)', l: 'Free' },
-    ].filter(p => p.v > 0);
-    const total = parts.reduce((a, p) => a + p.v, 0);
-    stack.innerHTML = total > 0
-      ? parts.map(p => `<div class="seg" style="flex-grow:${p.v};background:${p.c}"></div>`).join('')
-      : '';
-    stack.style.display = total > 0 ? '' : 'none';
-    legend.innerHTML = total > 0
-      ? parts.map(p => `<span class="li"><span class="sw" style="background:${p.c}"></span>${p.l} <b>${fmt(p.v)}</b></span>`).join('')
-      : `<span class="li">${lastP ? 'Nothing set aside yet' : 'Enter your first paycheck to get started'}</span>`;
-  }
+  renderCheckingBar(lastP);
 
   // Tiles
   const setTile = (id, text, subId, sub) => {
@@ -2051,6 +2057,132 @@ function renderDashboard() {
     : '<li class="empty-state">No purchases yet — tap + to log one</li>';
 
   animateMeters(document.getElementById('tab-0'));
+}
+
+// ── Where checking is ───────────────────────────────────
+// Every dollar in checking belongs somewhere: a bill reserve, a savings target,
+// an envelope (fixed and by-a-date buckets included), a savings transfer not moved yet,
+// or nothing (unassigned). One segment per item, coloured by kind. Anything
+// negative (an overspent envelope, or buckets adding up to more than checking)
+// sits to the LEFT of a zero line in hatched red, so positives minus negatives
+// is exactly what's in the bank.
+const STACK_KINDS = {
+  walls:  { c: 'var(--flow-walls)',    l: 'Bills' },
+  saving: { c: 'var(--flow-saving)',   l: 'Saving' },
+  env:    { c: 'var(--flow-spending)', l: 'Envelopes' },
+  free:   { c: 'var(--bar-muted)',     l: 'Unassigned' },
+  over:   { c: 'var(--neg)',           l: 'Overspent' },
+};
+
+function checkingBreakdown(d) {
+  const items = [];
+  const push = (kind, icon, label, v, note) => { v = roundCent(v); if (Math.abs(v) >= 0.005) items.push({ kind, icon, label, v, note: note || '' }); };
+
+  (d.bills || []).filter(b => b.active !== false)
+    .forEach(b => push('walls', '🧾', b.label, b.reserveBalance || 0, `for the ${fmt(b.amount)} bill`));
+  activeGoals(d).forEach(g => push('saving', g.icon, g.label, goalBal(d, g), `saved toward ${fmt(g.target)}`));
+  const latest = (d.transfers || [])[0];
+  if (latest && latest.v2) latest.items.filter(t => !t.checked && d.categories[t.key])
+    .forEach(t => push('saving', d.categories[t.key].icon, d.categories[t.key].label, t.amount, 'to move to savings'));
+  // Same set, same order as the Envelopes section: percentage ones, then
+  // fixed and by-a-date buckets (gas, feed, a Steam Frame fund…)
+  spendingKeys(d).map(k => d.categories[k]).filter(c => !isFlat(c))
+    .concat(flatCats(d).filter(c => c.type === 'spending'))
+    .forEach(c => push('env', c.icon, c.label, catBal(d, c),
+      isTarget(c) ? `saved toward ${fmt(c.targetAmount || 0)}`
+      : isFlat(c) ? `${fmt(c.flatAmount || 0)} ${flatFreqLabel(c).toLowerCase()}` : 'envelope'));
+
+  const assigned = items.reduce((a, x) => a + x.v, 0);
+  const rest = roundCent((d.checkingBalance || 0) - assigned);
+  if (rest >= 0.005) push('free', '·', 'Unassigned', rest, 'in checking, not in any bucket');
+  else if (rest <= -0.005) push('free', '!', 'Short', rest, 'buckets add up to more than checking');
+
+  items.forEach(x => { if (x.v < 0) x.neg = true; });
+  return items;
+}
+
+function renderCheckingBar(lastP) {
+  const stack = document.getElementById('dash-stack');
+  const legend = document.getElementById('dash-stack-legend');
+  const read = document.getElementById('dash-stack-read');
+  const table = document.getElementById('dash-stack-table');
+  if (!stack || !legend) return;
+
+  const items = checkingBreakdown(data);
+  const neg = items.filter(x => x.neg);
+  const order = ['walls', 'saving', 'env', 'free'];
+  const pos = items.filter(x => !x.neg).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  const bar = neg.concat(pos);
+  window._stackItems = bar;
+  window._stackPick = null;
+
+  if (!bar.length) {
+    stack.innerHTML = ''; stack.style.display = 'none';
+    legend.innerHTML = `<span class="li">${lastP ? 'Nothing in checking yet' : 'Enter your first paycheck to get started'}</span>`;
+    if (read) read.textContent = '';
+    if (table) table.style.display = 'none';
+    return;
+  }
+  stack.style.display = '';
+  const segs = bar.map((x, i) => {
+    const bg = x.neg ? 'repeating-linear-gradient(135deg,var(--neg) 0 3px,var(--neg-soft) 3px 5.5px)' : STACK_KINDS[x.kind].c;
+    return `<div class="seg${x.neg ? ' neg' : ''}" data-i="${i}" style="flex-grow:${Math.abs(x.v)};background:${bg}"></div>`;
+  });
+  if (neg.length && pos.length) segs.splice(neg.length, 0, '<div class="zero" aria-hidden="true"></div>');
+  stack.innerHTML = segs.join('');
+
+  // Legend: one entry per kind, with its total
+  const totals = {};
+  pos.forEach(x => totals[x.kind] = roundCent((totals[x.kind] || 0) + x.v));
+  const negTotal = roundCent(neg.reduce((a, x) => a + x.v, 0));
+  legend.innerHTML = (negTotal < 0
+      ? `<span class="li"><span class="sw hatch"></span>Over <b class="negative">−${fmt(-negTotal)}</b></span>` : '') +
+    order.filter(k => totals[k]).map(k =>
+      `<span class="li"><span class="sw" style="background:${STACK_KINDS[k].c}"></span>${STACK_KINDS[k].l} <b>${fmt(totals[k])}</b></span>`).join('');
+
+  if (read) read.innerHTML = stackHint(neg);
+
+  if (table) {
+    table.style.display = '';
+    const tb = table.querySelector('tbody');
+    if (tb) tb.innerHTML = bar.map(x => `<tr>
+      <td>${x.icon === '·' || x.icon === '!' ? '' : x.icon + ' '}${escHtml(x.label)}<div class="text-xs text-muted">${x.neg && x.kind !== 'free' ? 'overspent' : escHtml(x.note)}</div></td>
+      <td class="${x.neg ? 'negative' : ''}">${x.neg ? '−' + fmt(-x.v) : fmt(x.v)}</td></tr>`).join('') +
+      `<tr class="total"><td>In checking</td><td>${fmt(data.checkingBalance || 0)}</td></tr>`;
+  }
+}
+
+function stackHint(neg) {
+  if (neg.length) {
+    const names = neg.map(x => escHtml(x.label)).slice(0, 2).join(' and ');
+    return `<span class="negative">${names} ${neg.length === 1 ? 'is' : 'are'} in the red</span> · tap for details`;
+  }
+  return 'Tap the bar to see each bucket';
+}
+
+// Tap anywhere on the bar: pick the segment under the finger (the hit area is
+// taller than the bar so it's easy to hit on a phone).
+function stackTap(ev) {
+  const stack = document.getElementById('dash-stack');
+  const read = document.getElementById('dash-stack-read');
+  const items = window._stackItems || [];
+  if (!stack || !items.length) return;
+  const x = ev.clientX;
+  let pick = null;
+  stack.querySelectorAll('.seg').forEach(s => {
+    const r = s.getBoundingClientRect();
+    if (x >= r.left - 1 && x <= r.right + 1) pick = +s.dataset.i;
+  });
+  if (pick === null || pick === window._stackPick) pick = null;
+  window._stackPick = pick;
+  stack.classList.toggle('picking', pick !== null);
+  stack.querySelectorAll('.seg').forEach(s => s.classList.toggle('on', +s.dataset.i === pick));
+  if (!read) return;
+  if (pick === null) { read.innerHTML = stackHint(items.filter(i => i.neg)); return; }
+  const it = items[pick];
+  const icon = it.icon === '·' || it.icon === '!' ? '' : it.icon + ' ';
+  read.innerHTML = `${icon}<b>${escHtml(it.label)}</b> <span class="${it.neg ? 'negative' : ''}">${it.neg ? '−' + fmt(-it.v) : fmt(it.v)}</span>` +
+    ` <span class="rd-note">${it.neg && it.kind !== 'free' ? 'overspent' : escHtml(it.note)}</span>`;
 }
 
 // One purchase as a list row. Tapping it opens the editor.
