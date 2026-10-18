@@ -619,5 +619,37 @@ Unassigned > 0; everything else defaults to the old behaviour. Adjustments
 record `source`. Existing data isn't touched: the user fixes the inflated
 checking with Match my bank.
 
+## 20. Session v2026.12.5 — Bills due on a payday were one share short
+
+The user asked: does a finished target keep filling, and what happens with a
+date-bound bucket (dog food) when a paycheck is entered early? Checked by
+running the real script in a VM with a fake clock (simulating each day:
+`processDueBills` on open, then `processNewPaycheck` on payday).
+
+**Bug found and fixed:** `fridaysUntilDate` counted paydays ON OR BEFORE the
+due date. A bill due on a Friday counted that Friday's paycheck, but
+`processDueBills` charges it first thing that morning, before that paycheck
+can be entered. Every Friday-due bill was charged with one share missing
+(e.g. $48 of $60), and the rest of checking silently covered the gap. Entering
+paychecks a day early hid it. Now it counts paydays strictly BEFORE the due
+date (still at least 1). This one function feeds bills, savings targets and
+by-a-date buckets, so all three are full by the morning of their date. Only
+dates that fall on a Friday change.
+
+**Verified (not changed):**
+- Savings targets stop at the target (`min(perPaycheck, remaining)`); the
+  freed share goes to the percentage envelopes.
+- By-a-date buckets stop when full and refill toward the next cycle.
+- Fixed-$ buckets (gas) add every N paychecks with no cap, by design.
+- Percent savings accounts with a goal: a met goal sends its share to
+  `redirectTo`. The defaults chain Emergency → Wedding → College, but **the
+  category editor has no redirect picker**, so a user-made savings account
+  with a goal keeps taking its % after it's met. Offered to the user, not
+  built.
+
+Note: scratchpad tests don't survive a container reset. The time-travel
+harness (`clock.mjs`: the real script in `vm` with a `FakeDate`) is quick
+to rebuild.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

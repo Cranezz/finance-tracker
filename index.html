@@ -861,7 +861,7 @@
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b>v2026.12.4</b>Updated Sep 2026</div>
+      <div class="version-mark">Finance Tracker<b>v2026.12.5</b>Updated Sep 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -1589,8 +1589,12 @@ function daysSinceLastPaycheck(d) {
   return Math.max(1, diff);
 }
 
-// Count how many Fridays (paydays) fall on or before the due date, starting from today.
+// Count the Fridays (paydays) strictly BEFORE the due date, starting from today.
 // If today is Friday it counts. Always returns at least 1.
+// A payday that falls ON the due date doesn't count: bills are charged first
+// thing that morning, before that paycheck can be entered, so counting it left
+// every Friday-due bill one share short (covered silently by the rest of
+// checking). It's also what "have it by the date" means for targets.
 function fridaysUntilDate(dueDate) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1601,7 +1605,7 @@ function fridaysUntilDate(dueDate) {
   const dow = d.getDay(); // 0=Sun … 5=Fri … 6=Sat
   if (dow !== 5) d.setDate(d.getDate() + ((5 - dow + 7) % 7));
   let count = 0;
-  while (d <= due) { count++; d.setDate(d.getDate() + 7); }
+  while (d < due) { count++; d.setDate(d.getDate() + 7); }
   return Math.max(1, count);
 }
 
