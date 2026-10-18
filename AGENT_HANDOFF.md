@@ -651,5 +651,24 @@ Note: scratchpad tests don't survive a container reset. The time-travel
 harness (`clock.mjs`: the real script in `vm` with a `FakeDate`) is quick
 to rebuild.
 
+## 21. Session v2026.12.6 — A full savings account gives its share back
+
+User's rule: once something is full, the paycheck should split exactly as if
+it didn't exist, so its share goes to the envelopes. That was already true
+for savings targets and by-a-date buckets (verified with a $1,000 paycheck:
+full target = no target). It wasn't true for a user-made savings account
+with a goal and no `redirectTo` (the editor has no redirect picker): it kept
+its % forever.
+
+- `resolvePercents` now zeroes any `savingsFull(c)` account
+  (type savings, goal > 0, goalMet or balance ≥ goal) that has no
+  `redirectTo`, after the redirect chain runs. Stored `percents` are never
+  touched, so it resumes on its own when the balance drops below the goal.
+  The only callers are `buildPaycheckPlan` and `weeklyAllocRate`, both
+  read-only.
+- Fixed-$ savings accounts with a goal are capped at `goal − balance` in
+  `collectFlatContributions`.
+- The default chain (Emergency → Wedding → College) is unchanged.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

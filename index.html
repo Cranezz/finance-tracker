@@ -861,7 +861,7 @@
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b>v2026.12.5</b>Updated Sep 2026</div>
+      <div class="version-mark">Finance Tracker<b>v2026.12.6</b>Updated Sep 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -1149,7 +1149,16 @@ function resolvePercents(d, personId) {
       if (cats[t] && catVisibleTo(cats[t], personId)) { p[t] = (p[t] || 0) + p[k]; p[k] = 0; }
     }
   });
+  // A full savings account with nowhere to send its share takes nothing, so
+  // the paycheck splits exactly as if it weren't there: its share ends up in
+  // the envelopes, the same as a finished savings target.
+  keys.forEach(k => { if (savingsFull(cats[k]) && !cats[k].redirectTo) p[k] = 0; });
   return p;
+}
+
+function savingsFull(c) {
+  return !!c && c.type === 'savings' && Number(c.goal) > 0 &&
+    (c.goalMet || (c.balance || 0) >= Number(c.goal) - 0.005);
 }
 
 // Bills, funds and savings targets each come out of ONE person's paycheck (or
@@ -1896,6 +1905,8 @@ function collectFlatContributions(d, personId, commit) {
     } else {
       if ((c.paychecksUntilNext || 0) > 0) { if (commit) c.paychecksUntilNext--; return; }
       amt = roundCent(c.flatAmount || 0);
+      // A fixed amount into a savings account with a goal stops at the goal.
+      if (c.type === 'savings' && Number(c.goal) > 0) amt = Math.min(amt, Math.max(0, roundCent(c.goal - (c.balance || 0))));
       if (commit) c.paychecksUntilNext = Math.max(1, c.everyN || 1) - 1;
     }
     if (amt <= 0) return;
@@ -2430,7 +2441,7 @@ function renderGoals() {
     else if (remaining > 0) foot = `${fmt(remaining)} to go${etaText ? ' · ' + etaText + ' at this pace' : ''}`;
     else foot = cat.redirectTo && data.categories[cat.redirectTo]
       ? `Reached — its share now goes to ${escHtml(data.categories[cat.redirectTo].label)}`
-      : 'Reached 🎉';
+      : 'Reached 🎉 — its share now goes to your envelopes';
     return `<div class="card goal-card">
       <div class="goal-header">
         <div class="goal-name">${cat.icon} ${escHtml(cat.label)}</div>
