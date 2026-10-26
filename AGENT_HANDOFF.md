@@ -670,5 +670,47 @@ its % forever.
   `collectFlatContributions`.
 - The default chain (Emergency → Wedding → College) is unchanged.
 
+## 22. Session v2026.12.7–12.8 — Stuck progress bars; three sync bugs
+
+**v2026.12.7, bars stuck at 0:** `renderAll` draws Home (which calls
+`animateMeters` on it), then calls `renderBills` and `renderGoalTargets`
+again, replacing those rows. `animateMeters` captured the old elements, so
+the new bars never got a width. It showed on every redraw without a tab
+switch: sync merges, paychecks, edits. Now `animateMeters` looks the bars up
+when its frame runs, `renderAll` animates the active tab last, and both
+re-renderers animate their own containers.
+
+**v2026.12.8, sync (all reproduced with the real Code.gs before fixing):**
+1. *Bills charged twice.* `init()` ran `processDueBills` before syncing, so
+   two phones opened on a due date both charged it. Result: checking down 2×,
+   the reserve went negative, and the next cycle asked for 2×. Now:
+   - With sharing on, bills are charged in `syncAfterRun()` (the `finally`
+     of every `syncRun`), after hearing from the other phone; it still runs
+     when a sync fails, so an offline phone still pays bills.
+   - Bill expenses record `by` (deviceId) and `reserveUsed`.
+     `duplicateBillCharges` groups by billId+date, keeps the lowest id, and
+     `undoMyDuplicateBillCharges` makes each phone undo only its OWN extra
+     copies (refunding checking + reserve), so exactly once with no
+     coordination. It converges within a few polls.
+   - Duplicates from before `by` existed get a Home banner
+     (`#dupe-banner`, "Fix it" → `fixLegacyDuplicateBills`: syncs first,
+     re-checks, then refunds; the reserve refund is `min(amount, -reserve)`).
+2. *Oversized pushes.* Each push is one sheet cell (50,000-char limit). A big
+   change (restore, clearing history) failed on every retry forever. Now
+   `syncChunkOps` splits it into pushes of at most 40k (`SYNC_CHUNK_CHARS`).
+   After each piece lands it's applied to `syncBaseline` (so a drop mid-way
+   never resends it), while `lastSeq` only advances at the end (so remote
+   ops in the replies are refetched, not lost). No Code.gs change needed.
+3. *Match my bank / Settings checking* set an absolute value that syncs as a
+   delta; if the other phone's purchase hadn't arrived yet but the bank
+   already showed it, it came off twice. Both now `await syncRun()` first.
+
+Test harness (scratchpad, rebuild if gone): `server.mjs` runs the real
+`apps-script/Code.gs` against an in-memory sheet that enforces the 50k cell
+limit; `phone_new.mjs` runs the app per phone with its own localStorage and
+a shared fake clock. Scenarios: both phones on a due date, legacy dupes, a
+110k-char change, a connection dropped mid-way, a 300-action fuzz over 6
+seeds (identical docs, no dupes, reserve never negative).
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

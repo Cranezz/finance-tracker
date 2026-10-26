@@ -308,6 +308,9 @@
     }
     .dave-note::before, .callout::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
     .dave-note strong, .callout strong { color: var(--ink); font-weight: 650; }
+    .dupe-banner { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; padding: 14px; margin: 6px 0 12px; font-size: 14px; color: var(--ink-2); }
+    .dupe-banner b { color: var(--ink); }
+    .dupe-banner .btn { margin-top: 10px; }
     .sync-banner { background: var(--neg-soft); color: var(--neg); border-radius: 14px; padding: 12px 14px; font-size: 14px; font-weight: 600; margin: 6px 0 12px; }
 
     /* ── Buttons ─────────────────────────────────────────────────────── */
@@ -693,6 +696,7 @@
     <!-- Tab 0: Home -->
     <div id="tab-0" class="tab-content active">
       <div id="sync-banner" class="sync-banner" style="display:none"></div>
+      <div id="dupe-banner" class="dupe-banner" style="display:none"></div>
 
       <section class="hero" aria-label="In checking">
         <div class="hero-eyebrow">In checking <button class="hero-fix" onclick="openMatchBank()">Match my bank</button></div>
@@ -861,7 +865,7 @@
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b>v2026.12.6</b>Updated Sep 2026</div>
+      <div class="version-mark">Finance Tracker<b>v2026.12.8</b>Updated Sep 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -1666,7 +1670,11 @@ function processDueBills(d) {
       // from checking over time, so we just deduct the bill amount from checking now.
       d.checkingBalance = roundCent((d.checkingBalance || 0) - bill.amount);
       bill.reserveBalance = Math.max(0, roundCent(reserve - bill.amount));
-      d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id });
+      // `by` and `reserveUsed` let a shared phone undo exactly its own copy if
+      // the other phone charged the same bill before they synced.
+      const by = (typeof syncCfg !== 'undefined' && syncCfg.enabled) ? syncCfg.deviceId : '';
+      d.expenses.unshift({ id: uid(), date: dateStr, amount: bill.amount, category: bill.category, note: bill.label + ' (bill)', isBill: true, billId: bill.id,
+        by, reserveUsed: roundCent(reserve - bill.reserveBalance) });
       applied.push({ label: bill.label });
       bill.lastAppliedDate = dateStr;
       bill.lastApplied = dateStr; // legacy display compatibility
@@ -1956,6 +1964,7 @@ function renderAll() {
   renderBills();
   renderGoalTargets();
   if (activeTab === 4) renderAnalytics();
+  animateMeters(document.getElementById('tab-' + activeTab));
 }
 
 function renderHeader() {
@@ -2018,6 +2027,7 @@ function renderDashboard() {
   }
 
   renderCheckingBar(lastP);
+  renderDupeBanner();
 
   // Tiles
   const setTile = (id, text, subId, sub) => {
@@ -2160,9 +2170,13 @@ function updateMatchBankHint() {
     : `Checking ${diff > 0 ? 'goes up' : 'goes down'} by ${fmt(Math.abs(diff))} → Unassigned becomes ${after < 0 ? '−' + fmt(-after) + ' (short)' : fmt(after)}.`;
 }
 
-function submitMatchBank() {
+async function submitMatchBank() {
   const v = parseFloat(document.getElementById('bank-amt')?.value);
   if (isNaN(v)) { alert('Enter your bank balance'); return; }
+  // Checking syncs as a change (+/−), so work it out against the latest
+  // numbers — otherwise a purchase the other phone hasn't sent yet, which the
+  // bank already shows, would come off twice.
+  if (syncCfg.enabled) { try { await syncRun(false); } catch (e) {} }
   data.checkingBalance = roundCent(v);
   saveData(data);
   hideModal();
@@ -2251,6 +2265,19 @@ function stackTap(ev) {
   const icon = it.icon === '·' || it.icon === '!' ? '' : it.icon + ' ';
   read.innerHTML = `${icon}<b>${escHtml(it.label)}</b> <span class="${it.neg ? 'negative' : ''}">${it.neg ? '−' + fmt(-it.v) : fmt(it.v)}</span>` +
     ` <span class="rd-note">${it.neg && it.kind !== 'free' ? 'overspent' : escHtml(it.note)}</span>`;
+}
+
+function renderDupeBanner() {
+  const el = document.getElementById('dupe-banner');
+  if (!el) return;
+  const extra = legacyDuplicateBillCharges(data);
+  if (!extra.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const total = roundCent(extra.reduce((a, e) => a + e.amount, 0));
+  const names = [...new Set(extra.map(e => (data.bills.find(b => b.id === e.billId) || {}).label || 'A bill'))];
+  el.style.display = '';
+  el.innerHTML = `<b>${escHtml(names.join(', '))} ${extra.length === 1 ? 'was' : 'were'} charged twice</b> — both phones paid it on the same day before they synced. ` +
+    `Fixing puts ${fmt(total)} back in checking and removes the extra charge${extra.length === 1 ? '' : 's'}.` +
+    `<button class="btn btn-primary" onclick="fixLegacyDuplicateBills()">Fix it</button>`;
 }
 
 // One purchase as a list row. Tapping it opens the editor.
@@ -2523,6 +2550,7 @@ function renderBills() {
         </div>`;
       }).join('');
     }
+    animateMeters(dashEl);
   }
 
   // Settings bills list
@@ -2588,12 +2616,14 @@ function renderGoalTargets() {
     dashEl.innerHTML = goals.length
       ? goals.map(goalCardHTML).join('')
       : '<div class="empty-state">Nothing yet — tap Add for something you want by a date</div>';
+    animateMeters(dashEl);
   }
   const tabEl = document.getElementById('goals-targets');
   if (tabEl) {
     tabEl.innerHTML = goals.length
       ? `<div class="group">${goals.map(goalCardHTML).join('')}</div>`
       : '<div class="group"><div class="empty-state">Nothing being saved for right now</div></div>';
+    animateMeters(tabEl);
   }
   const setEl = document.getElementById('settings-goals');
   if (setEl) {
@@ -2754,11 +2784,14 @@ function moveNavPill() {
 }
 
 // Meters render at 0 and grow to their value on the next frame.
+// Looks the bars up when it runs, not when it's called: renderAll redraws the
+// bills and savings-target rows after the Home screen, which used to swap the
+// bars out from under an earlier call and leave the new ones stuck at 0.
 function animateMeters(root) {
   if (!root) return;
-  const fills = root.querySelectorAll('[data-w]');
-  if (reduceMotion()) { fills.forEach(el => el.style.width = el.dataset.w + '%'); return; }
-  requestAnimationFrame(() => requestAnimationFrame(() => fills.forEach(el => { el.style.width = el.dataset.w + '%'; })));
+  const fill = () => root.querySelectorAll('[data-w]').forEach(el => { el.style.width = el.dataset.w + '%'; });
+  if (reduceMotion()) { fill(); return; }
+  requestAnimationFrame(() => requestAnimationFrame(fill));
 }
 
 // Big figures count from their last value to the new one.
@@ -4643,8 +4676,9 @@ function renderPaycheckChart(paychecks) {
 // ══════════════════════════════════════════════════
 //  SETTINGS ACTIONS
 // ══════════════════════════════════════════════════
-function saveCheckingBalance() {
+async function saveCheckingBalance() {
   const val = parseFloat(document.getElementById('settings-checking')?.value)||0;
+  if (syncCfg.enabled) { try { await syncRun(false); } catch (e) {} }   // see submitMatchBank
   data.checkingBalance = roundCent(val);
   saveData(data);
   renderAll();
@@ -4769,6 +4803,7 @@ const SYNC_BACKUP_KEY = 'financeData_backupBeforeSync';
 const SYNC_POLL_MS = 10000;      // how often an open app checks for the other phone
 const SYNC_DEBOUNCE_MS = 1200;   // wait this long after a change before pushing
 const SYNC_SNAPSHOT_EVERY = 8;   // upload a full snapshot every N pushes
+const SYNC_CHUNK_CHARS = 40000;  // largest batch per push (a sheet cell holds 50,000)
 
 // Fields that accumulate money. Only these merge as deltas.
 const SYNC_DELTA_FIELDS = new Set(['balance', 'checkingBalance', 'reserveBalance', 'totalContributed']);
@@ -4928,6 +4963,20 @@ function syncNormalize(d) {
   return d;
 }
 
+// Splits a change list into pieces whose JSON stays under `limit` characters.
+// A single op bigger than that (never seen in practice) still goes alone.
+function syncChunkOps(ops, limit) {
+  if (!ops.length) return [[]];
+  const out = []; let cur = [], size = 2;
+  ops.forEach(op => {
+    const n = JSON.stringify(op).length + 1;
+    if (cur.length && size + n > limit) { out.push(cur); cur = []; size = 2; }
+    cur.push(op); size += n;
+  });
+  if (cur.length) out.push(cur);
+  return out;
+}
+
 // ── Talking to the sheet ──────────────────────────────────────────────────
 // text/plain keeps this a "simple" request so the browser skips the CORS
 // preflight, which Apps Script has no way to answer.
@@ -4976,19 +5025,36 @@ async function syncRun(forceSnapshot) {
     const ops = syncDiff(syncBaseline, pushedState);
 
     const wantSnapshot = forceSnapshot || syncCfg.pushesSinceSnapshot >= SYNC_SNAPSHOT_EVERY;
-    const body = {
-      action: 'push', code: syncCfg.code, deviceId: syncCfg.deviceId,
-      since: syncCfg.lastSeq, ops,
-    };
-    if (wantSnapshot && ops.length === 0) body.snapshot = JSON.stringify(pushedState);
-    else if (wantSnapshot) body.snapshot = JSON.stringify(pushedState);
 
-    const res = await syncFetch(body);
-
-    if (res.stale) { await syncBootstrap(true); return; }
+    // The sheet stores each push in ONE cell, and Google caps a cell at 50,000
+    // characters. A big change (restoring a backup, clearing history) would be
+    // refused on every retry and sharing would be stuck for good, so it goes up
+    // in pieces that each fit. The other phone applies them in order, same as
+    // any run of pushes.
+    const chunks = syncChunkOps(ops, SYNC_CHUNK_CHARS);
+    let since = syncCfg.lastSeq, res = null;
+    const seen = new Set(), remoteBatches = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const body = { action: 'push', code: syncCfg.code, deviceId: syncCfg.deviceId, since, ops: chunks[i] };
+      if (wantSnapshot && i === chunks.length - 1) body.snapshot = JSON.stringify(pushedState);
+      res = await syncFetch(body);
+      if (i === 0 && res.stale) { await syncBootstrap(true); return; }
+      (res.ops || []).forEach(b => { if (!seen.has(b.seq)) { seen.add(b.seq); remoteBatches.push(b); } });
+      since = Math.max(since, res.seq || 0);
+      if (i < chunks.length - 1) {
+        // Each piece that lands counts as agreed right away, so if the
+        // connection drops mid-way the next sync sends only what's left and
+        // never repeats a piece (which would apply its money changes twice).
+        // lastSeq stays put: the other phone's changes from these replies are
+        // fetched again next time rather than lost.
+        syncApplyOps(syncBaseline, chunks[i]);
+        saveSyncBaseline();
+      }
+    }
+    remoteBatches.sort((a, b) => a.seq - b.seq);
 
     const remote = [];
-    (res.ops || []).forEach(batch => remote.push(...(batch.ops || [])));
+    remoteBatches.forEach(batch => remote.push(...(batch.ops || [])));
     if (remote.length) {
       // The sheet's ordering decides who wins. Anything it hands back here was
       // sequenced BEFORE the batch we just pushed, so our edits go on top —
@@ -5025,8 +5091,85 @@ async function syncRun(forceSnapshot) {
     syncRenderStatus('error');
   } finally {
     syncBusy = false;
+    syncAfterRun();
     if (syncPending) { syncPending = false; setTimeout(() => syncRun(false), 400); }
   }
+}
+
+// Runs after every sync attempt, once this phone has the other phone's latest.
+//  • Charges any bills that have come due. Doing it here instead of on open
+//    means the other phone's charge has usually arrived already, and
+//    processDueBills skips a bill it can see was charged for that date.
+//  • If both phones still charged the same bill (both opened before either
+//    synced), one copy is kept: the one with the lowest id. The phone that
+//    made each other copy undoes its own, so it's undone exactly once.
+// Runs even when the sync failed, so a phone that's offline still pays bills.
+function syncAfterRun() {
+  if (!data || !data.setupComplete) return;
+  try {
+    const { d, applied } = processDueBills(data);
+    data = d;
+    const fixed = undoMyDuplicateBillCharges(data);
+    if (applied.length || fixed) { saveData(data); renderAll(); }
+  } catch (e) { /* never let bookkeeping break syncing */ }
+}
+
+// Bill charges that share a bill and a date. The first (lowest id) is the one
+// that counts; the rest are duplicates.
+function duplicateBillCharges(d) {
+  const groups = {};
+  (d.expenses || []).forEach(e => {
+    if (!e || !e.isBill || !e.billId) return;
+    (groups[e.billId + '|' + e.date] = groups[e.billId + '|' + e.date] || []).push(e);
+  });
+  const extra = [];
+  Object.values(groups).forEach(g => {
+    if (g.length < 2) return;
+    g.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    extra.push(...g.slice(1));
+  });
+  return extra;
+}
+
+// Takes one duplicate bill charge back out: the expense goes, and the money
+// returns to checking and to the bill's set-aside.
+function undoBillCharge(d, e, reserveBack) {
+  const i = d.expenses.indexOf(e);
+  if (i === -1) return;
+  d.expenses.splice(i, 1);
+  d.checkingBalance = roundCent((d.checkingBalance || 0) + e.amount);
+  const bill = (d.bills || []).find(b => b.id === e.billId);
+  if (bill && reserveBack > 0) bill.reserveBalance = roundCent((bill.reserveBalance || 0) + reserveBack);
+}
+
+function undoMyDuplicateBillCharges(d) {
+  if (!syncCfg.enabled || !syncCfg.deviceId) return 0;
+  const mine = duplicateBillCharges(d).filter(e => e.by === syncCfg.deviceId);
+  mine.forEach(e => undoBillCharge(d, e, e.reserveUsed || 0));
+  return mine.length;
+}
+
+// Duplicates from before charges recorded which phone made them. Nobody can
+// tell whose copy is whose, so the user fixes these with one tap.
+function legacyDuplicateBillCharges(d) {
+  return duplicateBillCharges(d).filter(e => !e.by);
+}
+
+async function fixLegacyDuplicateBills() {
+  // Get the other phone's latest first, in case it already fixed them.
+  if (syncCfg.enabled) { try { await syncRun(false); } catch (e) {} }
+  const extra = legacyDuplicateBillCharges(data);
+  if (!extra.length) { renderAll(); return; }
+  extra.forEach(e => {
+    const bill = (data.bills || []).find(b => b.id === e.billId);
+    // Each phone took the set-aside down by the same amount, which is what
+    // drove it below zero; give back that much.
+    const back = bill ? Math.min(e.amount, Math.max(0, -(bill.reserveBalance || 0))) : 0;
+    undoBillCharge(data, e, back);
+  });
+  saveData(data);
+  renderAll();
+  if (syncCfg.enabled) syncRun(false);
 }
 
 // Take the shared snapshot and start from it. Used when joining from a second
@@ -5281,9 +5424,13 @@ function init() {
     showSetup();
   } else {
     hideSetup();
-    const { d, applied } = processDueBills(data);
-    data = d;
-    if (applied.length) saveData(data);
+    // With sharing on, bills wait until this phone has heard from the other
+    // one (see syncAfterRun) — otherwise both phones charge the same bill.
+    if (!(syncCfg.enabled && syncCfg.url)) {
+      const { d, applied } = processDueBills(data);
+      data = d;
+      if (applied.length) saveData(data);
+    }
     renderAll();
   }
   renderDateLine();
