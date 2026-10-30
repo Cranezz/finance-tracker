@@ -763,5 +763,43 @@ replies, outages and cold restarts; checks phones identical, sheet = phones,
 checking = an independent tally; 8 seeds pass). With receipts disabled the
 fuzz fails by hundreds to thousands of dollars, so it does catch the bug.
 
+## 24. Session v2026.13.1 — Automatic hourly backups
+
+User asked for hourly backups ("if the backup is the exact same just overwrite
+the previous one") against accidental deletes, including by an agent.
+
+**In the sheet (Code.gs `backup_`):** a `Backups` tab (Backup | Saved at | Why
+| Values | Size | Part | data | code); data is the live `{path: json}` map,
+chunked into 40k-char cells. Called at the end of every `sync_` but gated to
+once an hour (`bk:<code>` script property holds {id, at, hash}). If the FNV
+hash matches the last copy, only its *Saved at* changes. Forced copies: in
+`seed_` before replacing ("Before switching to X's numbers") and after it
+("New shared copy from X"), and in `sync_` before a push that removes ≥25
+values and >30% of the live rows. Pruning: everything within 48 h, then the
+newest per day for 60 days. Actions `backups` (list) and `getBackup` (id →
+data). Needs no new OAuth scopes (no triggers): backups happen whenever a
+phone syncs, and with no syncing nothing can change anyway.
+
+**On the phone (`backupNow(why, force)`):** `financeBackups` in localStorage,
+same hourly + same-hash rule; checked on open and every 5 min. Keeps the 8
+newest plus the newest per day for a week, within 1.5M chars. `saveLocal` now
+drops local backups (oldest first) if storage is full, so the real data
+always saves. Forced copies before: clear all data, restore file, restore
+backup, adopting the shared copy.
+
+**Safety change:** `clearAllData` with sharing on now calls `syncDisable()`
+first, so an erased phone can't sync its emptiness to the sheet and the
+other phone. `syncTurnOff` = confirm + `syncDisable` + UI.
+
+**UI:** Settings → Backup → See backups (`openBackups`): this phone's copies
+and the sheet's, each with Restore (`restoreData`: backs up now, replaces the
+data, then `syncSeedFromThisPhone` if sharing is on).
+
+Tests: `t3_sheetbackup.mjs` (timing, same-hash bump, forced copies, 5-day
+pruning, exact restore), `t3_phonebackup.mjs` (retention, full storage, clear
+all with sharing, restores on both phones). They caught a missing
+`parseJson_` in the v2 Code.gs (it would have broken setup) and a retention
+bug.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

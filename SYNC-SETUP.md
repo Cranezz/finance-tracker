@@ -87,7 +87,8 @@ first). From then on both phones stay in step.
 
 ## Updating the script
 
-Sharing version 2 (app v2026.13.0) needs the new script. Do this once, on a
+Sharing version 2 (app v2026.13.0 and later) needs the new script — and the
+hourly Sheet backups need the version from v2026.13.1 or later. Do this once, on a
 computer, with the Sheet you already use:
 
 1. Open the Sheet → **Extensions → Apps Script**.
@@ -115,6 +116,13 @@ like.
   record: *What* (e.g. `Category › Food › Balance`), *Value*, when it last
   changed and which phone changed it. Sort or filter it to find anything. The
   columns after *By* are for the app; please don't edit them by hand.
+- **Backups** — full copies of *Shared values*, saved at most once an hour
+  while a phone is using the app. If nothing changed since the last copy, that
+  copy just gets the new time instead of being saved twice. An extra copy is
+  always saved right before anything that replaces or erases a lot (choosing
+  "Use this phone's numbers", restoring, a big removal). Kept: everything from
+  the last 48 hours, then one per day for 60 days. Restore any of them from the
+  app: **Settings → Backup → See backups**.
 - **Phones** — one row per phone: its name, app version, when it last synced,
   and its checking and savings totals at that moment. If the phones ever
   disagree, this shows which one and by how much. The app shows the same
@@ -141,10 +149,24 @@ like.
 - If something goes wrong you'll see a red banner on the dashboard with the
   reason, and Settings shows when it last synced.
 
-## Keeping a backup
+## Backups
 
-**Settings → 💾 Backup → Download Backup** saves a file of everything. Worth
-doing before any big change. **Restore From Backup** puts one back.
+Two sets of automatic copies, both hourly, both skipping duplicates:
+
+- **In the Google Sheet** (the *Backups* tab) — survives anything that happens
+  to a phone.
+- **On each phone** — works with sharing off or no signal: the 8 newest copies
+  plus one per day for a week.
+
+**Settings → Backup → See backups** lists both; **Restore** on any of them puts
+everything back to that moment (on both phones when sharing is on). A copy of
+the current state is saved first, so a restore can itself be undone.
+
+**Clear all data** saves a copy first, and with sharing on it only erases the
+phone you're holding and turns sharing off on it — the Sheet and the other
+phone keep everything.
+
+**Download file / Restore file** still work for keeping a copy somewhere else.
 
 ---
 

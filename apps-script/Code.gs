@@ -14,6 +14,13 @@
  *   '_receipts'     — ids of changes already applied (hidden). A phone that
  *                     didn't hear back sends the same change again with the
  *                     same id, and it is NOT applied twice.
+ *   'Backups'       — full copies of 'Shared values', taken at most once an
+ *                     hour while a phone is syncing. If nothing changed since
+ *                     the last copy, that copy just gets a new time instead of
+ *                     a duplicate. An extra copy is always taken right before
+ *                     anything that replaces or removes a lot of data. Kept:
+ *                     everything from the last 48 hours, then one per day for
+ *                     60 days.
  *
  * How a phone syncs: it sends the values it changed since it last heard from
  * the sheet, and gets back every row that changed since then. Money totals
@@ -25,6 +32,11 @@ var VALUES_SHEET = 'Shared values';
 var PHONES_SHEET = 'Phones';
 var RECEIPTS_SHEET = '_receipts';
 var MAX_RECEIPTS = 1000;
+var BACKUPS_SHEET = 'Backups';
+var BACKUP_EVERY_MS = 60 * 60 * 1000;        // hourly
+var KEEP_ALL_MS = 48 * 60 * 60 * 1000;       // keep every backup this recent
+var KEEP_DAILY_DAYS = 60;                    // then one per day for this long
+var CHUNK_CHARS = 40000;                     // per cell (a cell holds 50,000)
 
 // Columns in 'Shared values' (1-based).
 var V_COLS = 8;            // What | Value | Changed | By | path | json | ver | code
@@ -57,9 +69,11 @@ function handleRequest_(params, body) {
     return jsonOut_({ ok: false, error: 'The sheet is busy — trying again shortly.' });
   }
   try {
-    if (action === 'ping') return jsonOut_({ ok: true, pong: true, v2: true, seeded: !!getEpoch_(code) });
+    if (action === 'ping') return jsonOut_({ ok: true, pong: true, v2: true, backups: true, seeded: !!getEpoch_(code) });
     if (action === 'sync2') return jsonOut_(sync_(code, req));
     if (action === 'seed') return jsonOut_(seed_(code, req));
+    if (action === 'backups') return jsonOut_({ ok: true, backups: listBackups_(code) });
+    if (action === 'getBackup') return jsonOut_(getBackup_(code, String(req.id || '')));
     return jsonOut_({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err && err.message || err) });
@@ -76,6 +90,7 @@ function seed_(code, req) {
   var rows = req.rows || [];
   var sh = valuesSheet_();
   var all = readRows_(sh);
+  backup_(code, all, 'Before switching to ' + deviceName_(req) + "'s numbers", true);
   var keep = all.filter(function (r) { return String(r[V_CODE]) !== code; });
   var rev = getRev_(code) + 1;
   var now = new Date();
@@ -88,6 +103,7 @@ function seed_(code, req) {
   var epoch = String(req.epoch || ('E' + now.getTime()));
   PropertiesService.getScriptProperties().setProperty('epoch:' + code, epoch);
   if (req.pushId) addReceipt_(code, String(req.pushId), rev);
+  backup_(code, keep, 'New shared copy from ' + by, true);
   upsertPhone_(code, req);
   return { ok: true, seeded: true, epoch: epoch, rev: rev, devices: listPhones_(code) };
 }
@@ -117,6 +133,16 @@ function sync_(code, req) {
   var touched = {}, firstNew = all.length;
 
   if (changes.length && !already) {
+    // About to remove a lot at once (say, "clear all data" on a phone)? Copy first.
+    var live = 0, removing = 0;
+    for (var p0 in index) if (String(all[index[p0]][V_JSON]) !== '') live++;
+    changes.forEach(function (c) {
+      var at0 = index[String(c.p)];
+      if ((c.v === null || c.v === undefined) && at0 !== undefined && String(all[at0][V_JSON]) !== '') removing++;
+    });
+    if (removing >= 25 && removing > live * 0.3) {
+      backup_(code, all, 'Before ' + deviceName_(req) + ' removed ' + removing + ' values', true);
+    }
     var newRev = rev + 1, now = new Date(), by = deviceName_(req), any = false;
     changes.forEach(function (c) {
       var p = String(c.p);
@@ -144,6 +170,7 @@ function sync_(code, req) {
     writeChanged_(sh, all, touched, firstNew);
   }
   if (pushId && !already) addReceipt_(code, pushId, rev);
+  backup_(code, all, 'Hourly', false);
 
   upsertPhone_(code, req);
   return { ok: true, seeded: true, epoch: epoch, rev: rev, rows: rowsSince_(all, code, Number(req.since) || 0, false),
@@ -276,6 +303,118 @@ function addReceipt_(code, pushId, rev) {
   if (extra > 0) sh.deleteRows(2, extra);
 }
 
+// ── Backups ────────────────────────────────────────────────────────────────
+function backupsSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(BACKUPS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(BACKUPS_SHEET);
+    sh.getRange(1, 1, 1, 8).setValues([['Backup', 'Saved at', 'Why', 'Values', 'Size', 'Part', 'data', 'code']]);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, 8).setFontWeight('bold');
+  }
+  sh.getRange('A:A').setNumberFormat('@');
+  sh.getRange('G:G').setNumberFormat('@');
+  return sh;
+}
+
+// Copies this code's live values. Not forced: only if the last copy is an
+// hour old, and if nothing changed the last copy just gets the new time.
+function backup_(code, all, why, force) {
+  var props = PropertiesService.getScriptProperties();
+  var last = parseJson_(props.getProperty('bk:' + code), null);
+  var now = new Date();
+  if (!force && last && now.getTime() - last.at < BACKUP_EVERY_MS) return;
+  var map = {}, n = 0;
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i][V_CODE]) !== code) continue;
+    var json = String(all[i][V_JSON]);
+    if (json === '') continue;
+    map[String(all[i][V_PATH])] = json; n++;
+  }
+  if (!n) return;
+  var keys = Object.keys(map).sort();
+  var hash = hash_(JSON.stringify(keys.map(function (k) { return [k, map[k]]; })));
+  var sh = backupsSheet_();
+  var rows = sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues() : [];
+  if (last && last.hash === hash) {
+    // Same as the last copy: give it the new time instead of saving it twice.
+    for (var r = 0; r < rows.length; r++) {
+      if (String(rows[r][0]) === last.id && String(rows[r][7]) === code) sh.getRange(r + 2, 2).setValues([[now]]);
+    }
+    props.setProperty('bk:' + code, JSON.stringify({ id: last.id, at: now.getTime(), hash: hash }));
+    return;
+  }
+  var id = 'B' + now.getTime();
+  var text = JSON.stringify(map);
+  var add = [];
+  for (var start = 0, part = 1; start < text.length; start += CHUNK_CHARS, part++) {
+    add.push([id, now, String(why || ''), n, text.length, part, text.substr(start, CHUNK_CHARS), code]);
+  }
+  sh.getRange(rows.length + 2, 1, add.length, 8).setValues(add);
+  props.setProperty('bk:' + code, JSON.stringify({ id: id, at: now.getTime(), hash: hash }));
+  pruneBackups_(sh, code);
+}
+
+function backupGroups_(rows, code) {
+  var byId = {}, list = [];
+  rows.forEach(function (r) {
+    if (String(r[7]) !== code) return;
+    var id = String(r[0]);
+    if (!byId[id]) { byId[id] = { id: id, at: r[1] instanceof Date ? r[1].getTime() : Date.parse(r[1]) || 0, why: String(r[2]), values: num_(r[3]), size: num_(r[4]), parts: [] }; list.push(byId[id]); }
+    byId[id].parts.push({ part: num_(r[5]), data: String(r[6]) });
+  });
+  list.sort(function (a, b) { return b.at - a.at; });
+  return list;
+}
+
+// Everything from the last 48 hours; before that, the newest copy of each day
+// for 60 days. Older copies go.
+function pruneBackups_(sh, code) {
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var rows = sh.getRange(2, 1, last - 1, 8).getValues();
+  var now = Date.now(), seenDay = {}, drop = {};
+  backupGroups_(rows, code).forEach(function (b) {
+    if (now - b.at <= KEEP_ALL_MS) return;
+    var day = new Date(b.at).toISOString().slice(0, 10);
+    if (now - b.at > KEEP_DAILY_DAYS * 86400000 || seenDay[day]) { drop[b.id] = true; return; }
+    seenDay[day] = true;
+  });
+  if (!Object.keys(drop).length) return;
+  var keep = rows.filter(function (r) { return !(String(r[7]) === code && drop[String(r[0])]); });
+  sh.getRange(2, 1, rows.length, 8).clearContent();
+  if (keep.length) sh.getRange(2, 1, keep.length, 8).setValues(keep);
+}
+
+function listBackups_(code) {
+  var sh = backupsSheet_();
+  var rows = sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues() : [];
+  return backupGroups_(rows, code).map(function (b) {
+    return { id: b.id, at: new Date(b.at).toISOString(), why: b.why, values: b.values, size: b.size };
+  });
+}
+
+function getBackup_(code, id) {
+  var sh = backupsSheet_();
+  var rows = sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues() : [];
+  var b = backupGroups_(rows, code).filter(function (x) { return x.id === id; })[0];
+  if (!b) return { ok: false, error: 'That backup is no longer in the sheet.' };
+  b.parts.sort(function (x, y) { return x.part - y.part; });
+  return { ok: true, id: b.id, at: new Date(b.at).toISOString(), data: b.parts.map(function (x) { return x.data; }).join('') };
+}
+
+// Two FNV-1a passes with different seeds: plenty to tell "changed" from "same".
+function hash_(s) {
+  var a = 0x811c9dc5, b = 0x01000193 ^ 0x5bd1e995;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x0100019d) >>> 0;
+  }
+  return a.toString(16) + b.toString(16);
+}
+
 // ── Counters ───────────────────────────────────────────────────────────────
 function getRev_(code) { return num_(PropertiesService.getScriptProperties().getProperty('rev:' + code)); }
 function setRev_(code, rev) { PropertiesService.getScriptProperties().setProperty('rev:' + code, String(rev)); }
@@ -283,6 +422,7 @@ function getEpoch_(code) { return PropertiesService.getScriptProperties().getPro
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function num_(v) { var n = Number(v); return isNaN(n) ? 0 : n; }
+function parseJson_(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch (e) { return fallback; } }
 function round2_(n) { return Math.round(n * 100) / 100; }
 function isNumberJson_(s) { return /^-?\d+(\.\d+)?(e[-+]?\d+)?$/i.test(s); }
 function jsonOut_(obj) {

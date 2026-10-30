@@ -850,10 +850,12 @@
 
       <div class="card">
         <div class="card-title">Backup</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">Save a copy of everything to a file, or put one back. Worth doing before any big change.</div>
-        <div class="btn-row">
-          <button class="btn btn-secondary" onclick="exportData()">Download</button>
-          <button class="btn btn-secondary" onclick="openImportData()">Restore</button>
+        <div class="text-sm text-muted" style="margin-bottom:12px">A copy of everything is saved every hour on this phone, and in your Google Sheet's <b>Backups</b> tab when sharing is on. If nothing changed, the last copy just gets the new time. An extra copy is saved before anything that replaces or erases data.</div>
+        <div class="text-xs text-muted" id="backup-last" style="margin-bottom:12px"></div>
+        <button class="btn btn-primary" onclick="openBackups()">See backups</button>
+        <div class="btn-row mt-8">
+          <button class="btn btn-secondary" onclick="exportData()">Download file</button>
+          <button class="btn btn-secondary" onclick="openImportData()">Restore file</button>
         </div>
       </div>
 
@@ -865,14 +867,14 @@
 
       <div class="card">
         <div class="card-title" style="color:var(--neg)">Clear all data</div>
-        <div class="text-sm text-muted" style="margin-bottom:12px">Permanently erases everything on this phone. Type DELETE to confirm.</div>
+        <div class="text-sm text-muted" style="margin-bottom:12px">Erases everything on this phone. With sharing on, it erases <b>this phone only</b> and turns sharing off on it — the Google Sheet and the other phone keep everything. A backup is saved first. Type DELETE to confirm.</div>
         <div class="form-group">
           <input class="form-input" type="text" id="clear-confirm" placeholder="Type DELETE" autocapitalize="characters">
         </div>
         <button class="btn btn-danger" onclick="clearAllData()">Clear all data</button>
       </div>
 
-      <div class="version-mark">Finance Tracker<b id="app-version">v2026.13.0</b>Updated Oct 2026</div>
+      <div class="version-mark">Finance Tracker<b id="app-version">v2026.13.1</b>Updated Oct 2026</div>
     </div>
 
     <!-- Tab 4: Insights -->
@@ -916,7 +918,7 @@
 // ══════════════════════════════════════════════════
 //  CONSTANTS
 // ══════════════════════════════════════════════════
-const APP_VERSION = 'v2026.13.0';   // bump on every change (also in the Settings footer markup)
+const APP_VERSION = 'v2026.13.1';   // bump on every change (also in the Settings footer markup)
 const STORAGE_KEY = 'financeData';
 // Receipt scanning was removed in v2026.12.1. Its API key (a separate
 // localStorage entry, not part of financeData) is cleared on load.
@@ -981,7 +983,23 @@ function fallbackCategory() {
 function loadData() {
   try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
 }
-function saveLocal(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+function saveLocal(d) {
+  const text = JSON.stringify(d);
+  try { localStorage.setItem(STORAGE_KEY, text); return; } catch (e) {}
+  // Phone storage is full. The real data matters more than old copies of it:
+  // drop this phone's automatic backups one at a time until it fits.
+  try {
+    const list = JSON.parse(localStorage.getItem('financeBackups') || '[]');
+    while (list.length) {
+      list.pop();
+      try { localStorage.setItem('financeBackups', JSON.stringify(list)); } catch (e) { localStorage.removeItem('financeBackups'); list.length = 0; }
+      try { localStorage.setItem(STORAGE_KEY, text); return; } catch (e) {}
+    }
+    localStorage.setItem(STORAGE_KEY, text);
+  } catch (e) {
+    alert("Couldn't save — this phone's storage is full. Download a backup from Settings now.");
+  }
+}
 // Every mutation in the app already funnels through saveData, so hooking it here
 // is what lets sharing pick up changes without touching the other 25 functions.
 function saveData(d) {
@@ -2651,6 +2669,7 @@ function renderGoalTargets() {
 
 // ── Settings ────────────────────────────────────────────
 function renderSettings() {
+  renderBackupLast();
   // Checking
   document.getElementById('settings-checking').value = (data.checkingBalance||0).toFixed(2);
 
@@ -4729,6 +4748,10 @@ function saveBalanceSettings() {
 
 function clearAllData() {
   if (document.getElementById('clear-confirm')?.value.trim() !== 'DELETE') { alert('Type DELETE to confirm'); return; }
+  backupNow('Before clearing all data', true);
+  // An erased phone must not sync its emptiness to the sheet and the other
+  // phone, so sharing goes off here first.
+  if (syncCfg.enabled) syncDisable();
   localStorage.removeItem(STORAGE_KEY);
   data = migrateData(freshData());
   document.getElementById('clear-confirm').value = '';
@@ -5191,6 +5214,7 @@ function syncAdoptRows(res, batch) {
 // This phone starts over from the sheet's copy (joining, or after the other
 // phone chose "use this phone's numbers"). The old data is kept as a backup.
 function syncAdoptAll(res) {
+  backupNow("Before switching to the shared copy", true);
   try { localStorage.setItem(SYNC_BACKUP_KEY, localStorage.getItem(STORAGE_KEY) || ''); } catch {}
   const flat = {};
   (res.rows || []).forEach(r => { if (r.v !== null) flat[r.p] = r.v; });
@@ -5551,6 +5575,13 @@ async function syncManualSync() {
 
 function syncTurnOff() {
   if (!confirm('Stop sharing on this phone?\n\nYour data stays here exactly as it is, and the other phone keeps its own copy. Nothing is deleted from the sheet.')) return;
+  syncDisable();
+  hideModal();
+  renderAll();
+  syncRenderStatus('ok');
+}
+
+function syncDisable() {
   syncCfg.enabled = false;
   syncCfg.lastError = '';
   syncCfg.code = '';          // setting up again makes a fresh pairing code
@@ -5562,9 +5593,6 @@ function syncTurnOff() {
   saveSyncBase();
   syncSaveInflight(null);
   clearInterval(syncPollTimer);
-  hideModal();
-  renderAll();
-  syncRenderStatus('ok');
 }
 
 function renderSyncSettings() {
@@ -5573,6 +5601,157 @@ function renderSyncSettings() {
   el.innerHTML = `
     <div class="text-sm" id="sync-status" style="margin-bottom:12px">${escHtml(syncStatusLine())}</div>
     <button class="btn btn-secondary" onclick="openSyncSetup()">${syncCfg.enabled ? 'Manage sharing' : 'Set up sharing'}</button>`;
+}
+
+// ── Automatic backups ─────────────────────────────────────────────────────
+// On this phone: a full copy at most once an hour (checked when the app opens
+// and every few minutes while it's open). If nothing changed since the last
+// copy, that copy just gets the new time. Kept: the 8 newest copies, then
+// one per day for a week, within ~1.5 MB so they never crowd
+// out the real data (saveLocal drops them first if storage runs out).
+// With sharing on, the Google Sheet keeps its own copies in its Backups tab.
+const LOCAL_BACKUPS_KEY = 'financeBackups';
+const BACKUP_EVERY_MS = 60 * 60 * 1000;
+const LOCAL_BACKUP_BUDGET = 1500000;   // characters
+
+function strHash(s) {
+  let a = 0x811c9dc5, b = 0x01000193 ^ 0x5bd1e995;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x0100019d) >>> 0;
+  }
+  return a.toString(16) + b.toString(16);
+}
+
+function localBackups() {
+  try { const l = JSON.parse(localStorage.getItem(LOCAL_BACKUPS_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch { return []; }
+}
+
+function saveLocalBackups(list) {
+  while (true) {
+    try { localStorage.setItem(LOCAL_BACKUPS_KEY, JSON.stringify(list)); return; }
+    catch (e) { if (list.length <= 1) { try { localStorage.removeItem(LOCAL_BACKUPS_KEY); } catch {} return; } list.pop(); }
+  }
+}
+
+function backupNow(why, force) {
+  try {
+    if (!data || !data.setupComplete) return;
+    const now = Date.now();
+    let list = localBackups();
+    if (!force && list[0] && now - list[0].at < BACKUP_EVERY_MS) return;
+    const text = JSON.stringify(data);
+    const hash = strHash(text);
+    if (list[0] && list[0].hash === hash) {
+      list[0].at = now;                    // same as the last copy: just the new time
+    } else {
+      list.unshift({ id: 'L' + now, at: now, why, hash, checking: roundCent(data.checkingBalance || 0), data: text });
+    }
+    // The 8 newest copies, plus the newest copy of each earlier day for a
+    // week. (The newest copy of a day is kept once it falls out of the 8, so
+    // over time it becomes that day's copy.)
+    list.sort((a, b) => b.at - a.at);
+    const days = new Set();
+    list = list.filter((b, i) => {
+      const day = new Date(b.at).toDateString();
+      if (i < 8) { days.add(day); return true; }
+      if (now - b.at > 7 * 86400000 || days.has(day)) return false;
+      days.add(day);
+      return true;
+    });
+    let size = list.reduce((n, b) => n + (b.data || '').length, 0);
+    while (list.length > 1 && size > LOCAL_BACKUP_BUDGET) size -= (list.pop().data || '').length;
+    saveLocalBackups(list);
+    renderBackupLast();
+  } catch (e) { /* a backup must never break the app */ }
+}
+
+function backupWhen(t) {
+  const d = new Date(t);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86400000);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (diff === 0) return 'Today ' + time;
+  if (diff === 1) return 'Yesterday ' + time;
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + time;
+}
+
+function renderBackupLast() {
+  const el = document.getElementById('backup-last');
+  if (!el) return;
+  const last = localBackups()[0];
+  el.textContent = last ? `Last copy on this phone: ${backupWhen(last.at)}` : 'No copies on this phone yet.';
+}
+
+function backupRowHTML(b, restoreCall) {
+  return `<div class="row">
+    <div class="row-main"><div class="row-title">${escHtml(backupWhen(b.at))}</div>
+      <div class="row-sub">${escHtml(b.why || '')}${b.checking !== undefined ? ' · checking ' + fmt(b.checking) : ''}${b.values ? ' · ' + b.values + ' values' : ''}</div></div>
+    <div class="row-end"><button class="btn btn-secondary btn-sm" onclick="${restoreCall}">Restore</button></div>
+  </div>`;
+}
+
+function openBackups() {
+  const mine = localBackups();
+  document.getElementById('modal-title').textContent = 'Backups';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="text-sm text-muted" style="margin-bottom:14px">Restoring puts everything back to that moment${syncCfg.enabled ? ', on both phones' : ''}. A copy of right now is saved first, so a restore can be undone the same way.</div>
+    <div class="grp-h" style="margin:0 0 6px">On this phone</div>
+    <div class="group">${mine.length ? mine.map(b => backupRowHTML(b, `restoreLocalBackup('${b.id}')`)).join('') : '<div class="empty-state">No copies yet — the first one is saved within the hour.</div>'}</div>
+    ${syncCfg.enabled ? `<div class="grp-h" style="margin:18px 0 6px">In the Google Sheet</div>
+      <div class="group" id="sheet-backups"><div class="empty-state">Loading…</div></div>` : ''}
+    <div class="mt-12"><button class="btn btn-secondary" onclick="hideModal()">Close</button></div>`;
+  showModal();
+  if (syncCfg.enabled) loadSheetBackups();
+}
+
+async function loadSheetBackups() {
+  const show = html => { const el = document.getElementById('sheet-backups'); if (el) el.innerHTML = html; };
+  try {
+    const res = await syncFetch({ action: 'backups', code: syncCfg.code }, 30000);
+    const list = res.backups || [];
+    show(list.length ? list.map(b => backupRowHTML(b, `restoreSheetBackup('${b.id}')`)).join('')
+      : '<div class="empty-state">No copies in the sheet yet — the first one is saved within the hour.</div>');
+  } catch (err) {
+    show(`<div class="empty-state">${escHtml(err.message || String(err))}</div>`);
+  }
+}
+
+async function restoreLocalBackup(id) {
+  const b = localBackups().find(x => x.id === id);
+  if (!b) { alert('That backup is gone.'); return; }
+  let restored;
+  try { restored = JSON.parse(b.data); } catch { alert('That backup is unreadable.'); return; }
+  await restoreData(restored, backupWhen(b.at));
+}
+
+async function restoreSheetBackup(id) {
+  let res;
+  try { res = await syncFetch({ action: 'getBackup', code: syncCfg.code, id }, 60000); }
+  catch (err) { alert('Could not get that backup:\n\n' + (err.message || err)); return; }
+  let flat;
+  try { flat = JSON.parse(res.data); } catch { alert('That backup is unreadable.'); return; }
+  await restoreData(syncUnflatten(flat), backupWhen(Date.parse(res.at)));
+}
+
+async function restoreData(restored, when) {
+  if (!restored || typeof restored !== 'object' || !restored.categories) { alert('That backup has no data in it.'); return; }
+  const both = syncCfg.enabled;
+  if (!confirm(`Go back to the copy from ${when}?\n\nEverything ${both ? 'on both phones' : 'on this phone'} returns to that moment. A copy of right now is saved first.`)) return;
+  backupNow('Before restoring ' + when, true);
+  data = syncNormalize(restored);
+  data.setupComplete = true;
+  saveLocal(data);
+  if (both) {
+    // Make the restored copy the shared one; the other phone switches to it.
+    try { await syncSeedFromThisPhone(); }
+    catch (err) { alert('Restored on this phone, but the Google Sheet could not be updated:\n\n' + (err.message || err)); }
+  }
+  hideModal();
+  renderAll();
+  alert('Restored to ' + when + '.');
 }
 
 // ── Backup / restore (works with or without sharing) ──────────────────────
@@ -5605,6 +5784,7 @@ function submitImportData() {
   try { parsed = JSON.parse(raw); } catch { alert('That is not valid backup data.'); return; }
   if (!parsed || typeof parsed !== 'object' || !parsed.categories) { alert('That does not look like a Finance Tracker backup.'); return; }
   if (!confirm('Replace everything on this phone with this backup?')) return;
+  backupNow('Before restoring a file', true);
   try { localStorage.setItem(SYNC_BACKUP_KEY, localStorage.getItem(STORAGE_KEY) || ''); } catch {}
   data = syncNormalize(parsed);
   saveLocal(data);
@@ -5637,6 +5817,8 @@ function init() {
     }
     renderAll();
   }
+  backupNow('Hourly');
+  setInterval(() => backupNow('Hourly'), 5 * 60 * 1000);   // checks every 5 min, saves at most hourly
   renderDateLine();
   initHeaderScroll();
   initSheetDrag();
