@@ -712,5 +712,56 @@ a shared fake clock. Scenarios: both phones on a due date, legacy dupes, a
 110k-char change, a connection dropped mid-way, a 300-action fuzz over 6
 seeds (identical docs, no dupes, reserve never negative).
 
+## 23. Session v2026.13.0 — Sharing rebuilt: the sheet IS the shared copy
+
+User: the phones still drifted ("she ends up with a lot more or less than I
+am"), and asked for every setting in its own box in the sheet.
+
+**Root cause, reproduced:** under v1 (op log), if the sheet applied a push but
+the reply never reached the phone (app backgrounded, signal drop, Apps Script
+slower than the 20 s client timeout), the phone re-sent the same ops. The other
+phone applied them twice: same purchases, different totals, nothing visible.
+
+**v2 design (apps-script/Code.gs + the SHARING section of index.html):**
+- Sheet tabs: `Shared values` (What | Value | Changed | By | path | json | ver |
+  code; one row per leaf), `Phones` (each phone's version, last sync,
+  checking, saved, pending), `_receipts` (hidden pushIds). Columns A:B and
+  E:F are forced to plain text so Sheets never coerces dates or numbers.
+- Rows: `syncFlatten`/`syncUnflatten`. A path is a JSON array; list entries
+  are `{"i": id}`. `SYNC_RECORDS` (expenses, paychecks, adjustments) are one
+  row per entry, stored whole. `SYNC_ITEMS` (bills, goals, people,
+  transfers→items, funds) get a row per field plus an entry row holding its
+  position (an entry exists only while that row does). Empty `{}`/lists get
+  marker rows. Round trip is lossless (tested on a busy data set).
+- Push: `syncChanges(base, flat)`, where money leaves (`SYNC_DELTA_FIELDS`)
+  also carry `d` = new − old, and the server adds `d` to its current value.
+  Each batch is saved in localStorage (`financeSyncInflight`) with a pushId
+  and re-sent unchanged until confirmed; the server skips pushIds it has
+  receipts for. **This is the exactly-once guarantee; never drop it.**
+- Pull: the server returns every row with ver > since (our own included). The
+  phone adopts the sheet's value unless it edited that path while waiting
+  (money: sheet + local extra). Sent rows that come back unchanged are
+  recorded as agreed. After every sync, both phones equal the sheet.
+- Epoch: `seed` ("Use this phone's numbers") replaces the shared copy and sets
+  a new epoch; any phone with a different epoch gets `reset` and adopts
+  everything (old data → `financeData_backupBeforeSync`). Upgrading from v1
+  (cfg without v:2) pauses with a Home card until the user picks a phone.
+- Old app → new script gets "This phone's app is out of date"; new app → old
+  script gets "The Google Sheet script is the old version".
+- `APP_VERSION` constant (shown in Settings and sent to the Phones tab). Bump
+  it together with the footer markup.
+- Kept from v12.8: bills charged in `syncAfterRun`, duplicate-bill dedupe via
+  `by`, Match my bank syncs first.
+
+**The user must paste the new Code.gs and deploy a new version** (SYNC-SETUP.md
+→ "Updating the script"), then choose a phone.
+
+**Tests** (scratchpad, rebuild if gone): `server2.mjs` (real Code.gs on a
+Sheets mock with type coercion and the 50k cell limit), `phone2.mjs`, `h2.mjs`,
+`t2_basic`, `t2_upgrade`, `t2_bill`, `t2_fuzz` (400 random actions with lost
+replies, outages and cold restarts; checks phones identical, sheet = phones,
+checking = an independent tally; 8 seeds pass). With receipts disabled the
+fuzz fails by hundreds to thousands of dollars, so it does catch the bug.
+
 ---
 *End of handoff. When you finish your work, append your own session's changes/bugs to this file so the chain of context continues.*

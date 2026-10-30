@@ -1,8 +1,11 @@
 # Sharing the app between two phones
 
 This sets up one shared copy of your data in **a Google Sheet you own**, so your
-phone and your fiancée's phone show the same numbers. Both phones can add things
-at the same time — changes merge, so neither phone wipes out the other's.
+phone and your fiancée's phone show the same numbers. The Sheet holds every
+number and setting on its own row, and both phones copy it exactly.
+
+> **Already set up sharing before November 2026?** You only need
+> [Updating the script](#updating-the-script) below.
 
 Do the setup once, on a computer (about 10 minutes). After that it's two taps on
 each phone.
@@ -14,7 +17,7 @@ each phone.
 ```
    Your phone  ─┐                                    ┌─ a Google Sheet
                 ├─→  Apps Script web app  ──────────→│  in YOUR Drive
-   Her phone   ─┘     (the bit you deploy)           └─ (ops + state tabs)
+   Her phone   ─┘     (the bit you deploy)           └─ ('Shared values' + 'Phones' tabs)
 ```
 
 Nothing goes to me or to GitHub. No password or API key is stored in the app.
@@ -82,17 +85,59 @@ first). From then on both phones stay in step.
 
 ---
 
+## Updating the script
+
+Sharing version 2 (app v2026.13.0) needs the new script. Do this once, on a
+computer, with the Sheet you already use:
+
+1. Open the Sheet → **Extensions → Apps Script**.
+2. Select everything in the editor and delete it. Open
+   [`apps-script/Code.gs`](apps-script/Code.gs) from this repo, copy the
+   **whole file**, and paste it in. Click save (💾).
+3. **Deploy → Manage deployments** → click the **pencil** icon on your existing
+   deployment → **Version: New version** → **Deploy**. The URL stays the same,
+   so nothing changes on the phones.
+4. Update the app on **both** phones: close it completely and open it again.
+   The bottom of Settings should say **v2026.13.0**.
+5. Check which phone's numbers are right (compare checking and savings with the
+   bank). On **that** phone, tap **Use this phone's numbers** on the Home screen.
+6. Open the app on the other phone. It switches to those numbers by itself,
+   and keeps a backup of what it had.
+
+The old `ops` and `state` tabs aren't used any more; delete them whenever you
+like.
+
+---
+
+## What's in the Sheet
+
+- **Shared values** — the shared copy. One row per setting, balance and
+  record: *What* (e.g. `Category › Food › Balance`), *Value*, when it last
+  changed and which phone changed it. Sort or filter it to find anything. The
+  columns after *By* are for the app; please don't edit them by hand.
+- **Phones** — one row per phone: its name, app version, when it last synced,
+  and its checking and savings totals at that moment. If the phones ever
+  disagree, this shows which one and by how much. The app shows the same
+  table under Settings → Share With Another Phone.
+
 ## How it behaves day to day
+
+- **Every change is applied exactly once.** Each batch of changes carries a
+  receipt number. If a phone loses signal before the Sheet answers, it sends
+  the same batch again later and the Sheet recognises it.
+- **The Sheet always wins.** After every sync a phone copies the Sheet's values,
+  so two phones that have both synced can't disagree.
 
 - **Updates land within about 10 seconds** while an app is open, and right away
   when you switch back to it. It is not instant — Apps Script can't push, so the
   app checks in on a timer.
 - **Offline is fine.** Keep using the app on a plane or with no signal; it sends
   everything the next time it connects. Nothing is lost.
-- **Both of you can edit at once.** Money changes are sent as amounts
-  ("checking −$40"), never as totals, so two purchases logged at the same moment
-  both come off. Settings like names and percentages are last-edit-wins.
-- **Bills only auto-charge once** even with both phones open.
+- **Both of you can edit at once.** Balances are sent as "was → is", so two
+  purchases logged at the same moment both come off. Settings like names and
+  percentages are last-edit-wins.
+- **Bills only auto-charge once.** A phone syncs before charging, and if both
+  still charge the same bill, the extra charge undoes itself.
 - If something goes wrong you'll see a red banner on the dashboard with the
   reason, and Settings shows when it last synced.
 
@@ -120,8 +165,17 @@ Apps Script keeps serving the old version until you redeploy: **Deploy → Manag
 deployments → pencil icon → Version: New version → Deploy**. The URL stays the
 same.
 
-**Her phone shows old data**
-Open Settings → Share With Another Phone → **Sync Now**.
+**"The Google Sheet script is the old version"**
+Do [Updating the script](#updating-the-script).
+
+**"This phone's app is out of date"**
+That phone is still on the old app. Close the app completely and reopen it.
+
+**The phones show different numbers**
+Open Settings → Share With Another Phone and look at the **Phones** table.
+A phone with an old version or "changes waiting to send" just needs to be
+opened with signal. If the numbers are really wrong, pick the phone that matches
+the bank and tap **Phones don't match? Use this phone's numbers**.
 
 ## Starting over
 
@@ -129,6 +183,6 @@ To reset sharing (say the invite code leaked):
 
 1. Both phones: Settings → Share With Another Phone → **Turn Sharing Off**.
    Each phone keeps its own copy of the data.
-2. In the Sheet, delete the rows in the `ops` and `state` tabs.
+2. In the Sheet, delete the `Shared values`, `Phones` and `_receipts` tabs.
 3. Set it up again from Step 4. A fresh pairing code is generated, and the old
    one stops working.
